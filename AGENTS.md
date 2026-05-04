@@ -13,8 +13,8 @@ This file lets non-Claude tools (Cursor, Aider, Codex) discover the same IDD ski
 | `idd-plan`              | `skills/idd-plan/SKILL.md`              | explicit | Standard-tier plan: file-bound, acceptance-mapped slice + wave PLAN.md with a Verified Dependencies section. |
 | `idd-crucible`          | `skills/idd-crucible/SKILL.md`          | explicit | Standard-tier crucible ritual: assumptions inversion → adversarial Q&A → pre-mortem, producing UNDERSTANDING.md. |
 | `idd-review`            | `skills/idd-review/SKILL.md`            | explicit | Standard-tier review: cheap self-review + optional heavy subagent pass + convergence loop on HIGH+ findings (max 3 cycles). Targets PLAN.md or code diff. |
-| `idd-execute`           | `skills/idd-execute/SKILL.md`           | explicit | Focused-tier execute: implement directly from SPEC.md acceptance criteria. |
-| `idd-verify`            | `skills/idd-verify/SKILL.md`            | explicit | Three-layer verification: code-audit + scenario execution + UAT. |
+| `idd-execute`           | `skills/idd-execute/SKILL.md`           | explicit | Run the execute phase. Focused tier drives directly from SPEC.md acceptance criteria; standard / full tiers drive slice-by-slice from PLAN.md with wave parallelism and per-subagent context budgets. |
+| `idd-verify`            | `skills/idd-verify/SKILL.md`            | explicit | Three-layer verification: code-audit + Layer 2 scenario execution (when a BDD framework is detected via `tools.bdd_detect`) + conversational UAT. |
 | `idd-ship`              | `skills/idd-ship/SKILL.md`              | explicit | Standard-tier ship: write the canonical capability SPEC.md and archive the feature folder. M2 supports first-ship only; delta proposals are M3+. |
 | `idd-context-budget`    | `skills/idd-context-budget/SKILL.md`    | default | Refuse subagent dispatches that lack a context-budget block. |
 | `idd-subagent-dispatch` | `skills/idd-subagent-dispatch/SKILL.md` | default | Helper rules for dispatching context-bounded subagents. |

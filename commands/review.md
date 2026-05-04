@@ -21,5 +21,6 @@ Run the IDD review phase against the active feature.
 
 ## Failure modes
 
+- `tier == "focused"` → abort: "Review is standard-tier+. Focused tier verifies directly via /idd:verify after /idd:execute."
 - `--cross-ai` flag passed → fail with: "Cross-AI review is M4. Use /idd:review without --cross-ai for M2."
 - Convergence loop fails to drive HIGH+ findings to zero in 3 cycles → halt, surface remaining findings to user, status=escalated.

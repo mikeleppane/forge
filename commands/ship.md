@@ -12,10 +12,9 @@ Run the IDD ship phase against the active feature.
 1. Determine active feature.
 2. Read `state.json`. Require `tier in ("standard", "full")` and `phases.verify.status == "done"`. Otherwise abort.
 3. Read SPEC.md frontmatter to obtain the `capability` slug.
-4. Preflight via `tools.archive`: confirm `.idd/features/<id>/` exists, `.idd/features/archive/<id>/` does NOT exist, and `.idd/specs/<capability>/SPEC.md` does NOT exist. On any collision, abort with: "capability already shipped — delta proposals (M3+) required for changes." (Logged to `decisions.md` § Open.) Preflight runs entirely before any write.
-5. Call `tools.state.start_phase(path, "ship")`.
-6. Invoke the `idd-ship` skill (which calls `tools.archive.ship_feature` — a single transactional helper that performs both writes and rolls back the canonical spec on archive failure).
-7. On completion, print canonical spec path, archive path, capability slug, next step (none — feature done).
+4. Call `tools.state.start_phase(path, "ship")`.
+5. Invoke the `idd-ship` skill. The skill calls `tools.archive.ship_feature` — a single transactional helper that runs an all-or-nothing preflight (`.idd/features/<id>/` exists, `.idd/features/archive/<id>/` absent, `.idd/specs/<capability>/SPEC.md` absent), then writes the canonical spec, then archives the feature folder, rolling back the canonical write if the archive move fails. On any preflight collision, the helper raises `ArchiveError` ("capability already shipped — delta proposals (M3+) required for changes"); the skill logs to `decisions.md` § Open and halts.
+6. On completion, print canonical spec path, archive path, capability slug, next step (none — feature done).
 
 ## Failure modes
 

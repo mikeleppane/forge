@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tools import state
 
 
@@ -44,3 +46,28 @@ def test_state_schema_accepts_payload_without_routing(tmp_path: Path, schemas_di
     state.write_state(target, _base_payload(), schema_path=schemas_dir / "state.schema.json")
 
     assert "routing" not in json.loads(target.read_text(encoding="utf-8"))
+
+
+def test_state_schema_accepts_refined_idea(tmp_path: Path, schemas_dir: Path) -> None:
+    payload = _base_payload()
+    payload["refined_idea"] = (
+        "Allow checkout to apply a single stackable coupon. Coupon code is validated "
+        "against a cached registry; redemption is logged with the order id but never "
+        "with the raw code."
+    )
+    target = tmp_path / "state.json"
+
+    state.write_state(target, payload, schema_path=schemas_dir / "state.schema.json")
+
+    assert json.loads(target.read_text(encoding="utf-8"))["refined_idea"].startswith("Allow")
+
+
+def test_state_schema_rejects_non_string_refined_idea(tmp_path: Path, schemas_dir: Path) -> None:
+    payload = _base_payload()
+    payload["refined_idea"] = {"not": "a string"}
+    target = tmp_path / "state.json"
+
+    with pytest.raises(state.StateError, match="schema"):
+        state.write_state(target, payload, schema_path=schemas_dir / "state.schema.json")
+
+    assert not target.exists()

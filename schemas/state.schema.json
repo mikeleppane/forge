@@ -101,6 +101,9 @@
         "decided_at": { "type": "string", "format": "date-time" },
         "refine_attempts": { "type": "integer", "minimum": 0 }
       }
+    },
+    "refined_idea": {
+      "type": "string"
     }
   }
 }

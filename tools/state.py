@@ -269,13 +269,9 @@ def record_routing_decision(
         StateError: schema validation failure on read or write.
     """
     if final_tier not in VALID_TIERS:
-        raise StateError(
-            f"invalid final_tier {final_tier!r}; must be one of {VALID_TIERS}"
-        )
+        raise StateError(f"invalid final_tier {final_tier!r}; must be one of {VALID_TIERS}")
     if proposed_tier is not None and proposed_tier not in VALID_TIERS:
-        raise StateError(
-            f"invalid proposed_tier {proposed_tier!r}; must be one of {VALID_TIERS}"
-        )
+        raise StateError(f"invalid proposed_tier {proposed_tier!r}; must be one of {VALID_TIERS}")
     payload = read_state(path, schema_path=schema_path)
     block: dict[str, Any] = {
         "idea": idea,

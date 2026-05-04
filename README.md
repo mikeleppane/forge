@@ -2,6 +2,14 @@
 
 ![IDD logo](images/idd-logo.png)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://github.com/astral-sh/ruff)
+[![Type-checked: mypy strict](https://img.shields.io/badge/type--checked-mypy%20strict-2A6DB2.svg)](https://mypy-lang.org/)
+[![Tests: pytest](https://img.shields.io/badge/tests-pytest-0A9EDC.svg)](https://docs.pytest.org/)
+![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)
+[![Built for: Claude Code](https://img.shields.io/badge/built%20for-Claude%20Code-D97757.svg)](https://code.claude.com)
+
 > **Intent is the source. Spec is the contract. Verification reconciles reality.**
 
 A Claude Code plugin that encodes a lightweight-but-thorough Spec-Driven Development lifecycle for working with AI coding agents on real repositories.

@@ -1,4 +1,5 @@
 """All shipped JSON Schemas must validate against Draft 2020-12."""
+
 from __future__ import annotations
 
 import json

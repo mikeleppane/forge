@@ -204,7 +204,14 @@ def start_phase(
     if "phases" not in payload or not isinstance(payload["phases"], dict):
         raise StateError("state.json is missing the required `phases` mapping")
 
-    payload["phases"][phase] = {"status": "in_progress", "started_at": timestamp}
+    new_block: dict[str, Any] = {"status": "in_progress", "started_at": timestamp}
+    if phase == "review":
+        prior = payload["phases"].get("review")
+        if isinstance(prior, dict):
+            for carry in ("targets_done", "current_target"):
+                if carry in prior:
+                    new_block[carry] = prior[carry]
+    payload["phases"][phase] = new_block
     payload["current_phase"] = phase
 
     write_state(path, payload, schema_path=schema_path)

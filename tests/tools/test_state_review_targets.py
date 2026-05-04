@@ -281,6 +281,46 @@ def test_state_schema_rejects_review_target_fields_on_non_review_phase(
         state.write_state(target, payload, schema_path=schemas_dir / "state.schema.json")
 
 
+def test_start_phase_review_preserves_targets_done_across_restart(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """Second /idd:review pass must not wipe target audit from the first pass."""
+    target = tmp_path / "state.json"
+    initial = _payload_with_review(targets_done=["plan"], current_target="plan")
+    initial["current_phase"] = "execute"
+    initial["phases"]["execute"] = {"status": "done"}
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+
+    result = state.start_phase(
+        target,
+        phase="review",
+        schema_path=schemas_dir / "state.schema.json",
+        now="2026-05-04T12:30:00Z",
+    )
+
+    assert result["phases"]["review"]["status"] == "in_progress"
+    assert result["phases"]["review"]["targets_done"] == ["plan"]
+    assert result["phases"]["review"]["current_target"] == "plan"
+
+
+def test_start_phase_non_review_does_not_carry_review_keys(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    target = tmp_path / "state.json"
+    initial = _payload_with_review(targets_done=["plan"], current_target="plan")
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+
+    result = state.start_phase(
+        target,
+        phase="execute",
+        schema_path=schemas_dir / "state.schema.json",
+        now="2026-05-04T12:30:00Z",
+    )
+
+    assert "current_target" not in result["phases"]["execute"]
+    assert "targets_done" not in result["phases"]["execute"]
+
+
 def test_state_schema_rejects_targets_done_on_non_review_phase(
     tmp_path: Path, schemas_dir: Path
 ) -> None:

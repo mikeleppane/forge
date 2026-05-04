@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff check
+        run: ruff check tools tests hooks
+
+      - name: Mypy strict
+        run: mypy tools tests
+
+      - name: Lint frontmatter (skills + commands)
+        run: |
+          shopt -s nullglob
+          files=( skills/*/SKILL.md commands/*.md )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No skills/commands found; failing."
+            exit 1
+          fi
+          python -m tools.lint_frontmatter --schema schemas/frontmatter.schema.json "${files[@]}"
+
+      - name: Validate JSON Schemas + templates
+        run: python -m tools.check_schemas
+
+      - name: Validate plugin.json paths exist
+        run: |
+          test -f .claude-plugin/plugin.json
+          test -d skills
+          test -d commands
+          test -f hooks/hooks.json
+          test -f hooks/check_budget.py
+
+      - name: Run pytest
+        run: |
+          pytest tests/tools tests/smoke -v --maxfail=0 -ra
+          pytest --collect-only -q | tail -1

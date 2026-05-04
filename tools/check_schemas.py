@@ -20,11 +20,11 @@ SCHEMAS_DIR = REPO_ROOT / "schemas"
 TEMPLATES_DIR = REPO_ROOT / "templates"
 
 
-def _check_schema(name: str) -> None:
+def _check_schema(path: Path) -> None:
     """Validate a single shipped schema against Draft 2020-12 metaschema."""
-    schema = json.loads((SCHEMAS_DIR / name).read_text(encoding="utf-8"))
+    schema = json.loads(path.read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator.check_schema(schema)
-    print(f"OK schema {name}")
+    print(f"OK schema {path.name}")
 
 
 def _check_state_template() -> None:
@@ -63,8 +63,8 @@ def _check_spec_template_frontmatter() -> None:
 def main() -> int:
     """Run all schema and template checks; return 0 on success, 1 on failure."""
     try:
-        for name in ("state.schema.json", "frontmatter.schema.json", "spec-frontmatter.schema.json"):
-            _check_schema(name)
+        for path in sorted(SCHEMAS_DIR.glob("*.schema.json")):
+            _check_schema(path)
         _check_state_template()
         _check_spec_template_frontmatter()
     except (jsonschema.SchemaError, jsonschema.ValidationError) as exc:

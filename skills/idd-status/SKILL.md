@@ -23,7 +23,7 @@ Print one line summarizing the active feature's lifecycle position. Read-only.
 3. Read the resolved `state.json` via `tools.state.read_state`.
 4. Build summary line:
    - `<feature_id> [<tier>] — phase: <current_phase> (<status>) — last commit: <sha-short>`
-   - If `current_phase == "review"`: render phase as `review (target=<current_target>, done=[<comma-separated>])`.
+   - If `current_phase == "review"`: render phase as `review (target=<current_target>, done=[<comma-separated>])`. **If `current_target` is absent (review just started, no `set_review_target` call yet), render `target=none`.** **If `targets_done` is absent or empty, render `done=[]`.** Same fallbacks the verbose section uses; the summary line MUST NOT print the literal string `None` or `target=` with an empty value.
    - `<sha-short>` = first 7 chars of `state.json.commits[-1].sha`, or `none` when commits is empty.
 5. Print summary.
 6. If `--verbose`: print a phase history table after the summary line. Pin the rendering as follows:

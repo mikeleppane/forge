@@ -153,6 +153,35 @@ def test_record_refined_idea_overwrites_previous(tmp_path: Path, schemas_dir: Pa
     assert result["refined_idea"] == "new draft"
 
 
+def test_record_routing_decision_rejects_unknown_final_tier_without_schema(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "state.json"
+    state.write_state(target, _base_payload())  # no schema_path
+
+    with pytest.raises(state.StateError, match="invalid final_tier"):
+        state.record_routing_decision(
+            target,
+            idea="x",
+            final_tier="exotic",
+        )
+
+
+def test_record_routing_decision_rejects_unknown_proposed_tier_without_schema(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "state.json"
+    state.write_state(target, _base_payload())
+
+    with pytest.raises(state.StateError, match="invalid proposed_tier"):
+        state.record_routing_decision(
+            target,
+            idea="x",
+            proposed_tier="exotic",
+            final_tier="standard",
+        )
+
+
 def test_record_refined_idea_rejects_empty_string(tmp_path: Path, schemas_dir: Path) -> None:
     target = tmp_path / "state.json"
     state.write_state(target, _base_payload(), schema_path=schemas_dir / "state.schema.json")

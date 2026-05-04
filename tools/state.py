@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,12 @@ import jsonschema
 
 class StateError(RuntimeError):
     """Raised when state.json cannot be read, parsed, or transitioned."""
+
+
+_FEATURE_ID_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-[a-z0-9-]+$")
+
+
+VALID_TIERS = ("focused", "standard", "full")
 
 
 def _validator_for(schema: dict[str, Any]) -> jsonschema.Draft202012Validator:
@@ -412,6 +419,8 @@ def find_active_feature(
     """
     features_root = repo_root / ".idd" / "features"
     if feature_id is not None:
+        if not _FEATURE_ID_RE.fullmatch(feature_id):
+            raise StateError(f"invalid feature id: {feature_id!r}")
         candidate = features_root / feature_id
         if not candidate.is_dir() or not (candidate / "state.json").exists():
             raise StateError(f"feature {feature_id!r} not found at {candidate}")
@@ -429,8 +438,10 @@ def find_active_feature(
             continue
         try:
             payload = read_state(state_path)
-        except StateError:
-            continue
+        except StateError as exc:
+            raise StateError(
+                f"cannot resolve active feature: state.json under {entry.name} is invalid: {exc}"
+            ) from exc
         if payload.get("current_phase") != "done":
             active.append(entry)
 

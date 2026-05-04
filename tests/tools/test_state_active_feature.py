@@ -66,7 +66,29 @@ def test_find_active_feature_errors_when_explicit_id_missing(tmp_path: Path) -> 
     _make_feature(tmp_path, "2026-05-01-alpha", "spec")
 
     with pytest.raises(state.StateError, match="not found"):
-        state.find_active_feature(tmp_path, feature_id="2026-05-99-nope")
+        state.find_active_feature(tmp_path, feature_id="2026-05-30-nope")
+
+
+def test_find_active_feature_rejects_traversal_in_explicit_id(tmp_path: Path) -> None:
+    _make_feature(tmp_path, "2026-05-02-beta", "execute")
+
+    with pytest.raises(state.StateError, match="invalid feature id"):
+        state.find_active_feature(tmp_path, feature_id="../etc")
+
+
+def test_find_active_feature_rejects_malformed_slug(tmp_path: Path) -> None:
+    with pytest.raises(state.StateError, match="invalid feature id"):
+        state.find_active_feature(tmp_path, feature_id="not-a-valid-id")
+
+
+def test_find_active_feature_surfaces_malformed_state_json(tmp_path: Path) -> None:
+    """A corrupt state.json must not be silently treated as inactive."""
+    folder = tmp_path / ".idd" / "features" / "2026-05-02-beta"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "state.json").write_text("{ not json", encoding="utf-8")
+
+    with pytest.raises(state.StateError, match="invalid"):
+        state.find_active_feature(tmp_path)
 
 
 def test_find_active_feature_skips_archive_directory(tmp_path: Path) -> None:

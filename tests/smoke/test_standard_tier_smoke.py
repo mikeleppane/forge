@@ -12,6 +12,7 @@ This test does not invoke an LLM. It proves that:
   and ``ship_feature`` performs both writes transactionally.
 - Every ``EXPECTED_*.md`` fixture validates against its matching schema.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,20 +46,24 @@ M2_SKILLS = [
 # timestamps; the durable record is the per-target REVIEW file
 # (REVIEW.plan.md / REVIEW.code.md), not state.json.
 STANDARD_TIER_FLOW = (
-    "spec", "scenarios", "plan", "crucible",
-    "review",   # target=plan
+    "spec",
+    "scenarios",
+    "plan",
+    "crucible",
+    "review",  # target=plan
     "execute",
-    "review",   # target=code
-    "verify", "ship",
+    "review",  # target=code
+    "verify",
+    "ship",
 )
 
 # Each EXPECTED fixture artifact -> matching schema file.
 FIXTURE_FRONTMATTER_BINDINGS = [
-    ("EXPECTED_SPEC.md",            "spec-frontmatter.schema.json"),
-    ("EXPECTED_PLAN.md",            "plan-frontmatter.schema.json"),
-    ("EXPECTED_UNDERSTANDING.md",   "understanding-frontmatter.schema.json"),
-    ("EXPECTED_REVIEW.plan.md",     "review-frontmatter.schema.json"),
-    ("EXPECTED_REVIEW.code.md",     "review-frontmatter.schema.json"),
+    ("EXPECTED_SPEC.md", "spec-frontmatter.schema.json"),
+    ("EXPECTED_PLAN.md", "plan-frontmatter.schema.json"),
+    ("EXPECTED_UNDERSTANDING.md", "understanding-frontmatter.schema.json"),
+    ("EXPECTED_REVIEW.plan.md", "review-frontmatter.schema.json"),
+    ("EXPECTED_REVIEW.code.md", "review-frontmatter.schema.json"),
     ("EXPECTED_CAPABILITY_SPEC.md", "capability-spec-frontmatter.schema.json"),
 ]
 
@@ -78,22 +83,26 @@ def test_m2_surface_lints_against_frontmatter_schema(path: Path) -> None:
 def test_bdd_detect_fixture_returns_python_pytest_bdd() -> None:
     """The fixture target_repo declares pytest-bdd and ships a tests/features dir."""
     result = bdd_detect.detect(FIXTURE / "target_repo")
-    assert isinstance(result, bdd_detect.BDDFramework)
-    assert result.ecosystem == "python"
-    assert result.framework == "pytest-bdd"
+    assert isinstance(result, bdd_detect.Detected)
+    assert result.framework.ecosystem == "python"
+    assert result.framework.framework == "pytest-bdd"
 
 
-def test_bdd_detect_returns_none_when_dep_present_but_features_dir_missing(tmp_path: Path) -> None:
-    """A declared dep alone is not a signal — the features dir must exist too."""
+def test_bdd_detect_returns_ambiguous_when_dep_present_but_features_dir_missing(
+    tmp_path: Path,
+) -> None:
+    """Partial signal — calling skill must ask the user once and cache the answer."""
     (tmp_path / "pyproject.toml").write_text(
         "[project]\nname = 'demo'\ndependencies = ['pytest-bdd']\n",
         encoding="utf-8",
     )
-    assert bdd_detect.detect(tmp_path) is None
+    result = bdd_detect.detect(tmp_path)
+    assert isinstance(result, bdd_detect.Ambiguous)
+    assert "tests/features" in result.reason
 
 
-def test_bdd_detect_returns_none_for_empty_repo(tmp_path: Path) -> None:
-    assert bdd_detect.detect(tmp_path) is None
+def test_bdd_detect_returns_not_detected_for_empty_repo(tmp_path: Path) -> None:
+    assert bdd_detect.detect(tmp_path) == bdd_detect.NotDetected()
 
 
 def test_state_machine_accepts_full_standard_tier_flow_with_dual_review(tmp_path: Path) -> None:
@@ -102,15 +111,17 @@ def test_state_machine_accepts_full_standard_tier_flow_with_dual_review(tmp_path
     feature_dir.mkdir(parents=True)
     state_path = feature_dir / "state.json"
     state_path.write_text(
-        json.dumps({
-            "feature_id": feature_id,
-            "tier": "standard",
-            "current_phase": "spec",
-            "phases": {"spec": {"status": "in_progress", "started_at": "2026-05-04T00:00:00Z"}},
-            "skipped": [],
-            "deviations": [],
-            "commits": [],
-        }),
+        json.dumps(
+            {
+                "feature_id": feature_id,
+                "tier": "standard",
+                "current_phase": "spec",
+                "phases": {"spec": {"status": "in_progress", "started_at": "2026-05-04T00:00:00Z"}},
+                "skipped": [],
+                "deviations": [],
+                "commits": [],
+            }
+        ),
         encoding="utf-8",
     )
     schema = SCHEMAS_DIR / "state.schema.json"

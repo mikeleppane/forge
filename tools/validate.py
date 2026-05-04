@@ -296,6 +296,93 @@ def validate_delta(path: Path) -> list[Finding]:
     return findings
 
 
+_NR_PHRASE = re.compile(r"\b(SHALL NOT|MUST NOT)\b")
+_NR_SECTION = re.compile(r"^# Negative Requirements\s*$", re.MULTILINE)
+_FENCE_BLOCK = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE = re.compile(r"`[^`\n]+`")
+
+
+def _strip_code(text: str) -> str:
+    """Replace fenced + inline code regions with same-length whitespace.
+
+    NR phrases inside code fences are intentional examples (REVIEW.md prose,
+    Constitution article quotations, illustrative bash). Whitespace replacement
+    preserves byte offsets so reported line numbers still match the original
+    file.
+    """
+    out = _FENCE_BLOCK.sub(lambda m: " " * len(m.group(0)), text)
+    out = _INLINE_CODE.sub(lambda m: " " * len(m.group(0)), out)
+    return out
+
+
+def validate_negative_requirements(path: Path) -> list[Finding]:
+    """Validate `# Negative Requirements` placement per M3 spec §7.1 NR rules.
+
+    Checks:
+        1. File exists.
+        2. If any `SHALL NOT` / `MUST NOT` sentence appears in SPEC.md (outside
+           code fences and inline code), it MUST be inside the
+           `# Negative Requirements` section. Occurrences elsewhere BLOCK at
+           spec phase exit.
+
+    Args:
+        path: Path to the SPEC.md file.
+
+    Returns:
+        List of Finding records. Empty list means structurally valid.
+    """
+    findings: list[Finding] = []
+    text = _read_text(path)
+    if text is None:
+        findings.append(
+            Finding("BLOCK", "spec", path, f"file not found: {path}"),
+        )
+        return findings
+
+    scan = _strip_code(text)
+    section_match = _NR_SECTION.search(scan)
+    has_section = section_match is not None
+    if section_match is not None:
+        next_h1 = re.search(
+            r"^# [^\n]+$",
+            scan[section_match.end() :],
+            re.MULTILINE,
+        )
+        section_start = section_match.start()
+        section_end = section_match.end() + next_h1.start() if next_h1 else len(scan)
+    else:
+        section_start = section_end = -1
+
+    for match in _NR_PHRASE.finditer(scan):
+        offset = match.start()
+        if has_section and section_start <= offset < section_end:
+            continue
+        line_no = scan.count("\n", 0, offset) + 1
+        phrase = match.group(0)
+        if not has_section:
+            findings.append(
+                Finding(
+                    "BLOCK",
+                    "spec",
+                    path,
+                    f"line {line_no}: '{phrase}' phrase used but no "
+                    f"'# Negative Requirements' section exists",
+                ),
+            )
+        else:
+            findings.append(
+                Finding(
+                    "BLOCK",
+                    "spec",
+                    path,
+                    f"line {line_no}: '{phrase}' phrase appears outside "
+                    f"'# Negative Requirements' section",
+                ),
+            )
+
+    return findings
+
+
 def _load_schema(filename: str) -> dict[str, Any]:
     result: dict[str, Any] = json.loads((_SCHEMAS_DIR / filename).read_text(encoding="utf-8"))
     return result

@@ -1,0 +1,50 @@
+---
+name: idd-spec
+description: Author or refine a feature SPEC.md following the IDD §7.1 template. Use when the user asks to start a new IDD feature, write a spec, or refine an existing SPEC.md. Produces the source-of-truth artifact for everything downstream.
+disable-model-invocation: true
+---
+
+# IDD Spec Authoring
+
+## Goal
+
+Produce a `.idd/features/<id>/SPEC.md` that obeys the §7.1 template and exits with no Open Questions.
+
+## Inputs
+
+- The user's idea text (free-form).
+- `.idd/intel/` if present (read on demand, never preloaded wholesale).
+- Existing related specs in `.idd/features/*/SPEC.md` (only when explicitly relevant).
+
+## Steps
+
+1. **Generate the feature id.** Format: `YYYY-MM-DD-<kebab-slug>`. Slug = 2–5 words, derived from the idea.
+2. **Check for collision.** If `.idd/features/<id>/` already exists, abort with: "Feature folder already exists. Re-run with `--feature <id>` to refine, or pick a different slug." Use `tools.state.feature_folder_exists(repo_root, feature_id)`.
+3. **Create the feature folder.** `.idd/features/<id>/`. Copy `templates/feature/state.json`, `templates/feature/SPEC.md`, and `templates/feature/decisions.md` into it; set `feature_id`, `tier` (default `focused`), and `current_phase: "spec"`.
+4. **Initialize SPEC.md** from the copied template; `decisions.md` stays empty until the first decision is logged.
+5. **Fill the template — one section at a time, asking only when ambiguous.**
+   - **Frontmatter.** Set `id`, `status: draft`, `tier`, `created`, `capability` (stable handle).
+   - **Intent.** One paragraph. WHY. Drill until the *why* is concrete.
+   - **Context.** Background and constraints. Reference RESEARCH.md only if it already exists.
+   - **Domain.** Glossary table. Aim for 4–8 terms; more is usually noise. Add a Mermaid sketch only if it clarifies a non-obvious relationship.
+   - **Codebase Anchors.** Concrete `path:Symbol` pointers a subagent can use without reading the whole repo.
+   - **Scope.** Behavior-level bullets. Make the Out of Scope list as long as the In Scope list when uncertainty is high — it surfaces tacit assumptions.
+   - **Scenarios.** Markdown Gherkin. One scenario per behavior. Strict `.feature` files come later (M2). Cap at 5 in M1; if you need more, the slice is too big.
+   - **Test Strategy.** Map each criterion to test type (unit / integration / scenario / UAT) and target location.
+   - **Acceptance Criteria.** Falsifiable. Each maps to one scenario or one measurable outcome.
+   - **Negative Requirements.** Explicit MUST-NOT statements. `/idd:verify` will assert each.
+   - **Open Questions.** Numbered. Add liberally as you fill the template; resolve before exit.
+6. **Self-review gate (cheap, embedded):**
+   - No placeholder text remaining.
+   - Every Term in Domain appears at least once in Intent / Scope / Scenarios.
+   - Every In Scope bullet is covered by ≥1 Scenario.
+   - Every Acceptance criterion maps to ≥1 Scenario or names a measurable outcome.
+   - Every Acceptance criterion has a row in Test Strategy.
+   - Open Questions count is 0.
+   - Ambiguity score (heuristic): count words like "should", "might", "TBD", "etc." in non-list paragraphs. > 3 = block; refine.
+7. **Update `state.json`:** call `tools.state.complete_phase(path, "spec")`, then `tools.state.start_phase(path, next_phase)` where `next_phase` is `execute` for `--focused`, otherwise the first phase the user requested.
+8. **Surface to the user:** print path to SPEC.md, summarize Intent and Acceptance, list any accepted assumptions logged to `decisions.md` during refinement.
+
+## Done
+
+`.idd/features/<id>/SPEC.md` exists, satisfies the §7.1 template, and self-review passed. `state.json` reflects spec=done.

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://idd.dev/schemas/frontmatter.schema.json",
+  "title": "IDD Skill/Command Frontmatter",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["name", "description"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Kebab-case identifier. Skills must additionally start with 'idd-' (enforced by directory layout, not the schema)."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 40,
+      "description": "Imperative-what + 'Use when X' clause. Validated structurally by tools.lint_frontmatter."
+    },
+    "disable-model-invocation": {
+      "type": "boolean"
+    },
+    "allowed-tools": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "hooks": {
+      "type": "object"
+    }
+  }
+}

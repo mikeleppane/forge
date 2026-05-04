@@ -429,3 +429,67 @@ def find_active_feature(
         ids = ", ".join(p.name for p in active)
         raise StateError(f"multiple active features ({ids}); pass --feature <id> to disambiguate")
     return active[0]
+
+
+_FOCUSED_NEXT: dict[str, str | None] = {
+    "spec": "/idd:execute",
+    "execute": "/idd:verify",
+    "verify": None,
+}
+
+_STANDARD_NEXT: dict[str, str | None] = {
+    "refine": "/idd:spec",
+    "spec": "/idd:scenarios",
+    "scenarios": "/idd:plan",
+    "plan": "/idd:crucible",
+    "crucible": "/idd:review --target plan",
+    "execute": "/idd:review --target code",
+    "verify": "/idd:ship",
+    "ship": None,
+}
+
+_FULL_NEXT: dict[str, str | None] = {
+    **_STANDARD_NEXT,
+    "spec": "/idd:domain",
+    "domain": "/idd:scenarios",
+}
+
+
+def _next_review_command(state_payload: dict[str, Any]) -> str:
+    """Resolve the next command when the current phase is `review`."""
+    review = state_payload.get("phases", {}).get("review", {})
+    done = review.get("targets_done", [])
+    if "plan" not in done:
+        return "/idd:review --target plan"
+    if "code" not in done:
+        return "/idd:execute"
+    return "/idd:verify"
+
+
+def next_phase_command(state_payload: dict[str, Any]) -> str | None:
+    """Return the slash-command for the next pipeline phase, or None when done.
+
+    Read-only. Pure function over a state.json payload. See M3 spec §5.3.7.
+
+    Args:
+        state_payload: Parsed state.json (must contain `tier`, `current_phase`,
+            and `phases`).
+
+    Returns:
+        Slash command string (e.g. '/idd:scenarios') or None when at terminal phase.
+    """
+    tier = state_payload.get("tier")
+    phase = state_payload.get("current_phase")
+
+    if not isinstance(phase, str) or not isinstance(tier, str):
+        return None
+
+    if tier == "focused":
+        return _FOCUSED_NEXT.get(phase)
+
+    table = {"standard": _STANDARD_NEXT, "full": _FULL_NEXT}.get(tier)
+    if table is None:
+        return None
+    if phase == "review":
+        return _next_review_command(state_payload)
+    return table.get(phase)

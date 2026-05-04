@@ -1,4 +1,5 @@
 """Archival + canonical-spec write — pure file ops with explicit failure modes."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -50,7 +51,10 @@ def test_archive_feature_missing_source_raises(tmp_path: Path) -> None:
 
 
 def test_canonical_spec_path_uses_specs_capability_spec(tmp_path: Path) -> None:
-    assert canonical_spec_path(tmp_path, "feature-flag") == tmp_path / ".idd" / "specs" / "feature-flag" / "SPEC.md"
+    assert (
+        canonical_spec_path(tmp_path, "feature-flag")
+        == tmp_path / ".idd" / "specs" / "feature-flag" / "SPEC.md"
+    )
 
 
 def test_write_canonical_spec_creates_folder_and_file(tmp_path: Path) -> None:
@@ -160,7 +164,8 @@ def test_ship_feature_rejects_invalid_capability(tmp_path: Path, bad_capability:
 
 
 def test_ship_feature_rolls_back_canonical_when_archive_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If archive_feature raises after canonical write, canonical is removed and ArchiveError re-raised."""
     feature_id = "2026-05-04-toggle-add"
@@ -180,3 +185,57 @@ def test_ship_feature_rolls_back_canonical_when_archive_fails(
     assert not canonical.exists(), "canonical spec should be rolled back when archive fails"
     # Source still present
     assert (tmp_path / ".idd" / "features" / feature_id / "SPEC.md").exists()
+
+
+def test_ship_feature_pre_archive_hook_runs_against_live_source(tmp_path: Path) -> None:
+    """Hook receives the live source path (pre-move) and its writes survive the move."""
+    feature_id = "2026-05-04-toggle-add"
+    capability = "feature-flag"
+    _seed_feature(tmp_path, feature_id, files={"state.json": '{"current_phase":"ship"}\n'})
+
+    captured: list[Path] = []
+
+    def hook(source: Path) -> None:
+        captured.append(source)
+        # Simulate marking state done before the move.
+        (source / "state.json").write_text(
+            '{"current_phase":"done"}\n',
+            encoding="utf-8",
+        )
+
+    canonical, archived = ship_feature(
+        tmp_path,
+        feature_id,
+        capability,
+        "---\ncapability: feature-flag\n---\n# x\n",
+        pre_archive_hook=hook,
+    )
+
+    assert captured == [tmp_path / ".idd" / "features" / feature_id]
+    assert canonical.is_file()
+    # The hook's mutation traveled with the move.
+    assert (archived / "state.json").read_text(encoding="utf-8") == '{"current_phase":"done"}\n'
+
+
+def test_ship_feature_rolls_back_canonical_when_pre_archive_hook_raises(tmp_path: Path) -> None:
+    """A hook failure must trigger canonical rollback and surface the cause."""
+    feature_id = "2026-05-04-toggle-add"
+    capability = "feature-flag"
+    _seed_feature(tmp_path, feature_id, files={"SPEC.md": "# spec\n"})
+
+    def hook(_: Path) -> None:
+        raise RuntimeError("state mutation went wrong")
+
+    with pytest.raises(ArchiveError, match=r"pre_archive_hook failed.*state mutation went wrong"):
+        ship_feature(
+            tmp_path,
+            feature_id,
+            capability,
+            "---\ncapability: feature-flag\n---\n# x\n",
+            pre_archive_hook=hook,
+        )
+
+    canonical = tmp_path / ".idd" / "specs" / capability / "SPEC.md"
+    assert not canonical.exists(), "canonical rolled back on hook failure"
+    assert (tmp_path / ".idd" / "features" / feature_id / "SPEC.md").exists()
+    assert not (tmp_path / ".idd" / "features" / "archive" / feature_id).exists()

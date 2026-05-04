@@ -3,10 +3,12 @@
 These are pure file operations with explicit failure modes; the Python layer
 owns the path math so the LLM cannot misplace shipped artifacts.
 """
+
 from __future__ import annotations
 
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 _CAPABILITY_RE = re.compile(r"^[a-z0-9-]+$")
@@ -100,6 +102,7 @@ def ship_feature(
     feature_id: str,
     capability: str,
     body: str,
+    pre_archive_hook: Callable[[Path], None] | None = None,
 ) -> tuple[Path, Path]:
     """Atomically write the canonical capability spec and archive the feature folder.
 
@@ -115,15 +118,24 @@ def ship_feature(
 
     Mutation:
         1. Write canonical spec via `write_canonical_spec`.
-        2. Move feature folder via `archive_feature`.
-        3. On step-2 failure, delete the canonical spec file (and its parent dir
-           if it was newly created and is now empty), then re-raise.
+        2. Run ``pre_archive_hook(source)`` against the still-live feature folder
+           if provided. Use this to mutate ``state.json`` (e.g., mark
+           ``current_phase: done``) so the live state and the archived copy
+           agree. Hook failure rolls back the canonical write before re-raising.
+        3. Move feature folder via `archive_feature`.
+        4. On move failure, delete the canonical spec file (and its parent dir
+           if it was newly created and is now empty), then re-raise. The
+           pre-archive hook's effects on the live state.json are NOT undone —
+           callers that mutate state must idempotently re-apply on retry.
 
     Args:
         repo_root: Repository root containing the .idd/ tree.
         feature_id: Feature folder name in YYYY-MM-DD-slug form.
         capability: Capability slug (lowercase letters, digits, hyphens).
         body: Full SPEC.md text content (frontmatter + body).
+        pre_archive_hook: Optional callback that runs after the canonical write
+            and before the archive move, given the live ``source`` path. Any
+            exception is treated as ship failure and triggers canonical rollback.
 
     Returns:
         Tuple of (canonical_spec_path, archive_path) on success.
@@ -131,7 +143,8 @@ def ship_feature(
     Raises:
         ArchiveError: any preflight failure (invalid slug, missing source,
             existing canonical, existing archive) leaves the repo untouched.
-            Archive-step failure rolls back the canonical write before re-raising.
+            Hook or archive-step failure rolls back the canonical write before
+            re-raising.
     """
     _validate_feature_id(feature_id)
     _validate_capability(capability)
@@ -154,16 +167,27 @@ def ship_feature(
     capability_dir_existed = canonical_target.parent.exists()
 
     canonical = write_canonical_spec(repo_root, capability, body)
-    try:
-        archived = archive_feature(repo_root, feature_id)
-    except ArchiveError as exc:
-        # Rollback: delete the canonical spec file we just wrote.
+
+    def _rollback_canonical() -> None:
         canonical.unlink(missing_ok=True)
-        # If the capability dir was newly created and is now empty, remove it.
         if not capability_dir_existed:
             parent = canonical.parent
             if parent.exists() and not any(parent.iterdir()):
                 parent.rmdir()
+
+    if pre_archive_hook is not None:
+        try:
+            pre_archive_hook(source)
+        except Exception as exc:
+            _rollback_canonical()
+            raise ArchiveError(
+                f"ship_feature: pre_archive_hook failed; canonical spec rolled back: {exc}",
+            ) from exc
+
+    try:
+        archived = archive_feature(repo_root, feature_id)
+    except ArchiveError as exc:
+        _rollback_canonical()
         raise ArchiveError(
             f"ship_feature: archive failed; canonical spec rolled back: {exc}",
         ) from exc

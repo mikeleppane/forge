@@ -93,3 +93,78 @@ def write_canonical_spec(repo_root: Path, capability: str, body: str) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body, encoding="utf-8")
     return target
+
+
+def ship_feature(
+    repo_root: Path,
+    feature_id: str,
+    capability: str,
+    body: str,
+) -> tuple[Path, Path]:
+    """Atomically write the canonical capability spec and archive the feature folder.
+
+    The transactional contract for /idd:ship: all preflight checks pass before any
+    write, and the canonical spec write is rolled back if archival fails.
+
+    Preflight (all-or-nothing):
+        1. Validate `feature_id` slug.
+        2. Validate `capability` slug.
+        3. Source `.idd/features/<feature_id>/` must be a directory.
+        4. Canonical `.idd/specs/<capability>/SPEC.md` must NOT exist.
+        5. Archive target `.idd/features/archive/<feature_id>/` must NOT exist.
+
+    Mutation:
+        1. Write canonical spec via `write_canonical_spec`.
+        2. Move feature folder via `archive_feature`.
+        3. On step-2 failure, delete the canonical spec file (and its parent dir
+           if it was newly created and is now empty), then re-raise.
+
+    Args:
+        repo_root: Repository root containing the .idd/ tree.
+        feature_id: Feature folder name in YYYY-MM-DD-slug form.
+        capability: Capability slug (lowercase letters, digits, hyphens).
+        body: Full SPEC.md text content (frontmatter + body).
+
+    Returns:
+        Tuple of (canonical_spec_path, archive_path) on success.
+
+    Raises:
+        ArchiveError: any preflight failure (invalid slug, missing source,
+            existing canonical, existing archive) leaves the repo untouched.
+            Archive-step failure rolls back the canonical write before re-raising.
+    """
+    _validate_feature_id(feature_id)
+    _validate_capability(capability)
+
+    source = repo_root / ".idd" / "features" / feature_id
+    if not source.is_dir():
+        raise ArchiveError(f"feature folder not found: {source}")
+
+    canonical_target = canonical_spec_path(repo_root, capability)
+    if canonical_target.exists():
+        raise ArchiveError(
+            f"canonical spec already exists at {canonical_target}; "
+            "feature already shipped — delta proposals (M3+) required for changes",
+        )
+
+    archive_target = repo_root / ".idd" / "features" / "archive" / feature_id
+    if archive_target.exists():
+        raise ArchiveError(f"feature already archived at {archive_target}")
+
+    capability_dir_existed = canonical_target.parent.exists()
+
+    canonical = write_canonical_spec(repo_root, capability, body)
+    try:
+        archived = archive_feature(repo_root, feature_id)
+    except ArchiveError as exc:
+        # Rollback: delete the canonical spec file we just wrote.
+        canonical.unlink(missing_ok=True)
+        # If the capability dir was newly created and is now empty, remove it.
+        if not capability_dir_existed:
+            parent = canonical.parent
+            if parent.exists() and not any(parent.iterdir()):
+                parent.rmdir()
+        raise ArchiveError(
+            f"ship_feature: archive failed; canonical spec rolled back: {exc}",
+        ) from exc
+    return canonical, archived

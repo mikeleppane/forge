@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "skills": {
+    "idd-spec":              { "phase": "spec",    "tiers": ["focused", "standard", "full"] },
+    "idd-execute":           { "phase": "execute", "tiers": ["focused", "standard", "full"] },
+    "idd-verify":            { "phase": "verify",  "tiers": ["focused", "standard", "full"] },
+    "idd-context-budget":    { "phase": "*",       "tiers": ["focused", "standard", "full"] },
+    "idd-subagent-dispatch": { "phase": "*",       "tiers": ["focused", "standard", "full"] }
+  }
+}

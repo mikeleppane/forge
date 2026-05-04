@@ -1,10 +1,10 @@
 ---
-capability: <kebab-slug>
+capability: template-placeholder
 status: shipped
-created: <YYYY-MM-DD>
-last_updated: <YYYY-MM-DD>
+created: "2026-01-01"
+last_updated: "2026-01-01"
 evidence:
-  - <feature-id>: features/archive/<feature-id>/
+  - 0000-00-00-template-placeholder: features/archive/0000-00-00-template-placeholder/
 bounded_context: null
 ---
 

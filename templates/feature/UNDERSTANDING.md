@@ -1,7 +1,7 @@
 ---
-spec: <feature-id>
+spec: 0000-00-00-template-placeholder
 ritual: assumptions → adversarial → pre-mortem
-generated: <YYYY-MM-DD>
+generated: "2026-01-01"
 ---
 
 # Confirmed Assumptions

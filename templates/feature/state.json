@@ -1,0 +1,11 @@
+{
+  "feature_id": "<YYYY-MM-DD-slug>",
+  "tier": "focused",
+  "current_phase": "spec",
+  "phases": {
+    "spec": { "status": "pending" }
+  },
+  "skipped": [],
+  "deviations": [],
+  "commits": []
+}

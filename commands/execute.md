@@ -13,7 +13,7 @@ Run the IDD execute phase against the active feature.
 2. Read `state.json`.
    - If `tier == "focused"` and `phases.spec.status == "done"` → invoke `idd-execute` skill (focused branch — M1 behavior).
    - If `tier in ("standard", "full")`:
-     - Require `phases.review.status == "done"` AND target was `plan` (REVIEW.md frontmatter `target: plan`, `status: resolved`).
+     - Require `phases.review.status == "done"` AND `.idd/features/<id>/REVIEW.plan.md` exists with frontmatter `target: plan`, `status: resolved`.
      - Require `PLAN.md` exists with frontmatter `status: ready`.
      - Invoke `idd-execute` skill (standard branch).
    - Otherwise → abort with reason.
@@ -23,7 +23,7 @@ Run the IDD execute phase against the active feature.
 ## Failure modes
 
 - `state.json` missing or fails schema → abort, surface validator output.
-- Standard tier with no REVIEW.md or REVIEW.md `status: open` → abort: "Run /idd:review --target plan and resolve HIGH+ findings before /idd:execute."
+- Standard tier with no `REVIEW.plan.md` or `REVIEW.plan.md` `status: open` → abort: "Run /idd:review --target plan and resolve HIGH+ findings before /idd:execute."
 - Subagent dispatch blocked by `PreToolUse` hook → surface the hook's reason; the model edits the dispatch to comply, then retries.
 - Subagent returns `status: blocked` → halt, log to `decisions.md` § Open, surface blocker.
 - Working tree has uncommitted changes when execute starts → warn, ask user to commit or stash.

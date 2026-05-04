@@ -90,7 +90,7 @@ disallow_untyped_defs = true
 disallow_any_unimported = true
 namespace_packages = true
 explicit_package_bases = true
-files = ["tools", "tests"]
+files = ["tools", "tests", "hooks"]
 exclude = ["tests/fixtures"]
 
 [tool.pytest.ini_options]

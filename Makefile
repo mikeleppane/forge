@@ -24,18 +24,18 @@ install: ## Create venv (if missing) and install idd-tools with dev extras
 	@$(PIP) install -e ".[dev]" $(PIP_INDEX)
 
 format: ## Apply ruff formatter
-	@$(RUFF) format tools tests
+	@$(RUFF) format tools tests hooks
 
 fmt: format ## Alias for `format`
 
 lint: ## Run ruff lint (no fixes)
-	@$(RUFF) check tools tests
+	@$(RUFF) check tools tests hooks
 
 fix: ## Run ruff lint with --fix
-	@$(RUFF) check --fix tools tests
+	@$(RUFF) check --fix tools tests hooks
 
 typecheck: ## Run mypy strict
-	@$(MYPY) tools tests
+	@$(MYPY) tools tests hooks
 
 test: ## Run pytest
 	@$(PYTEST) -v

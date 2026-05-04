@@ -26,7 +26,7 @@ jobs:
         run: ruff check tools tests hooks
 
       - name: Mypy strict
-        run: mypy tools tests
+        run: mypy tools tests hooks
 
       - name: Lint frontmatter (skills + commands)
         run: |

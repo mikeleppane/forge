@@ -152,10 +152,11 @@ def validate_constitution(path: Path) -> list[Finding]:
     fm, body = parsed
 
     schema = _load_schema("constitution-frontmatter.schema.json")
-    findings.extend(
-        Finding("BLOCK", "constitution", path, f"frontmatter: {err.message}")
-        for err in sorted(_build_validator(schema).iter_errors(fm), key=lambda e: list(e.path))
-    )
+    for err in sorted(_build_validator(schema).iter_errors(fm), key=lambda e: list(e.path)):
+        field = f".{err.path[-1]}" if err.path else ""
+        findings.append(
+            Finding("BLOCK", "constitution", path, f"frontmatter{field}: {err.message}"),
+        )
 
     article_lines = [line for line in body.splitlines() if line.startswith("## Article")]
     article_numbers: list[int] = []

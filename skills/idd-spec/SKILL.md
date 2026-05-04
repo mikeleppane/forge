@@ -20,8 +20,8 @@ Produce a `.idd/features/<id>/SPEC.md` that obeys the §7.1 template and exits w
 
 1. **Generate the feature id.** Format: `YYYY-MM-DD-<kebab-slug>`. Slug = 2–5 words, derived from the idea.
 2. **Check for collision.** If `.idd/features/<id>/` already exists, abort with: "Feature folder already exists. Re-run with `--feature <id>` to refine, or pick a different slug." Use `tools.state.feature_folder_exists(repo_root, feature_id)`.
-3. **Create the feature folder.** `.idd/features/<id>/`. Copy `templates/feature/state.json` into it; set `feature_id`, `tier` (default `focused`), and `current_phase: "spec"`.
-4. **Copy the SPEC.md template** from `templates/feature/SPEC.md` into the feature folder.
+3. **Create the feature folder.** `.idd/features/<id>/`. Copy `templates/feature/state.json`, `templates/feature/SPEC.md`, and `templates/feature/decisions.md` into it; set `feature_id`, `tier` (default `focused`), and `current_phase: "spec"`.
+4. **Initialize SPEC.md** from the copied template; `decisions.md` stays empty until the first decision is logged.
 5. **Fill the template — one section at a time, asking only when ambiguous.**
    - **Frontmatter.** Set `id`, `status: draft`, `tier`, `created`, `capability` (stable handle).
    - **Intent.** One paragraph. WHY. Drill until the *why* is concrete.

@@ -108,7 +108,7 @@ M1 — **Foundation + Focused Tier** — under active development.
 
 | Milestone | Scope |
 |---|---|
-| **M1** | Foundation: plugin scaffolding, schemas, tooling, focused tier (`/idd-spec` `/idd-execute` `/idd-verify` `/idd-validate`), reference fixture, CI |
+| **M1** | Foundation: plugin scaffolding, schemas, tooling, focused tier (`/idd:spec` `/idd:execute` `/idd:verify`), reference fixture, CI |
 | **M2** | Standard tier: `/idd-scenarios` `/idd-plan` `/idd-crucible` `/idd-review` `/idd-ship` |
 | **M3** | Full tier + adaptive routing: `/idd-refine` `/idd-research` `/idd-domain` `/idd-do` with tier estimation |
 | **M4** | Cross-AI review, `/idd-resume`, delta proposals, intel auto-refresh |
@@ -136,7 +136,7 @@ A formal install path (`claude plugins install …`) ships with M1.
 
 ## Configuration
 
-Per-project settings live in `.idd/config.json` (created on first run). Configurable bits include default tier, cross-AI provider, context budget overrides, and which phases auto-escalate.
+Per-feature state lives in `.idd/features/<id>/state.json` (created by `/idd:spec`). Project-wide configuration (default tier, cross-AI provider, context-budget overrides, auto-escalation rules) is planned for a later milestone — not present in M1.
 
 The tooling itself (state machine, frontmatter linter, schema validator) is a small Python package shipped in `tools/`.
 

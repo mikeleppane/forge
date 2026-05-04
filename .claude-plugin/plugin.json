@@ -1,0 +1,16 @@
+{
+  "name": "idd",
+  "version": "0.1.0",
+  "description": "Lightweight-but-thorough spec-driven development lifecycle. Intent is the source. Spec is the contract. Verification reconciles reality.",
+  "author": {
+    "name": "Mikko Leppänen",
+    "email": "mleppan23@gmail.com"
+  },
+  "homepage": "https://github.com/mikelep/idd",
+  "repository": "https://github.com/mikelep/idd",
+  "license": "MIT",
+  "keywords": ["spec-driven", "tdd", "claude-code", "workflow"],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "hooks": "./hooks/hooks.json"
+}

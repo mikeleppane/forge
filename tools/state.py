@@ -324,6 +324,11 @@ def set_review_target(
     review_block = payload.get("phases", {}).get("review")
     if review_block is None:
         raise StateError("cannot set review_target: phases.review entry missing")
+    review_status = review_block.get("status")
+    if review_status != "in_progress":
+        raise StateError(
+            f"cannot set review_target: review status is {review_status!r}, expected 'in_progress'"
+        )
     review_block["current_target"] = review_target
     review_block.setdefault("targets_done", [])
     write_state(path, payload, schema_path=schema_path)
@@ -358,6 +363,12 @@ def complete_review_target(
     review_block = payload.get("phases", {}).get("review")
     if review_block is None:
         raise StateError("cannot complete review_target: phases.review entry missing")
+    review_status = review_block.get("status")
+    if review_status != "in_progress":
+        raise StateError(
+            f"cannot complete review_target: review status is {review_status!r}, "
+            f"expected 'in_progress'"
+        )
     current = review_block.get("current_target")
     if current != review_target:
         raise StateError(

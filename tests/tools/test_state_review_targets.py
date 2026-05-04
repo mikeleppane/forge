@@ -181,6 +181,56 @@ def test_complete_phase_review_passes_when_both_targets_done(
     assert result["phases"]["review"]["completed_at"] == "2026-05-04T12:00:00Z"
 
 
+def test_set_review_target_rejects_when_review_status_done(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    target = tmp_path / "state.json"
+    initial = _payload_with_review(targets_done=["plan", "code"], current_target="code")
+    initial["phases"]["review"]["status"] = "done"
+    initial["phases"]["review"]["completed_at"] = "2026-05-04T12:00:00Z"
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+
+    with pytest.raises(state.StateError, match="status is 'done'"):
+        state.set_review_target(
+            target,
+            review_target="plan",
+            schema_path=schemas_dir / "state.schema.json",
+        )
+
+
+def test_set_review_target_rejects_when_review_status_pending(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    target = tmp_path / "state.json"
+    initial = _payload_with_review(targets_done=[], current_target=None)
+    initial["phases"]["review"]["status"] = "pending"
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+
+    with pytest.raises(state.StateError, match="status is 'pending'"):
+        state.set_review_target(
+            target,
+            review_target="plan",
+            schema_path=schemas_dir / "state.schema.json",
+        )
+
+
+def test_complete_review_target_rejects_when_review_status_done(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    target = tmp_path / "state.json"
+    initial = _payload_with_review(targets_done=["plan"], current_target="plan")
+    initial["phases"]["review"]["status"] = "done"
+    initial["phases"]["review"]["completed_at"] = "2026-05-04T12:00:00Z"
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+
+    with pytest.raises(state.StateError, match="status is 'done'"):
+        state.complete_review_target(
+            target,
+            review_target="plan",
+            schema_path=schemas_dir / "state.schema.json",
+        )
+
+
 def test_complete_phase_non_review_unchanged_by_target_gate(
     tmp_path: Path, schemas_dir: Path
 ) -> None:

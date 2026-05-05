@@ -104,6 +104,15 @@ def test_duplicate_article_numbers_report_duplicate_not_monotonic() -> None:
     assert not monotonic, monotonic
 
 
+def test_utf8_bom_at_file_start_does_not_break_frontmatter() -> None:
+    """A BOM-prefixed Constitution (common from Windows editors) must parse
+    cleanly. Without BOM stripping the leading 0xEF 0xBB 0xBF bytes break
+    the `^---\\n` frontmatter regex and surface as a misleading
+    'missing or malformed frontmatter' finding."""
+    findings = validate.validate_constitution(FIXTURES / "constitution_with_bom.md")
+    assert findings == [], findings
+
+
 def test_invalid_yaml_frontmatter_returns_block_not_traceback() -> None:
     """Malformed YAML must surface as a structured BLOCK finding instead of
     crashing the CLI on a `yaml.YAMLError` traceback."""

@@ -71,15 +71,18 @@ _NEXT_H2 = re.compile(r"^## ", re.MULTILINE)
 
 
 def _read_text(path: Path) -> str | None:
-    """Return file contents, or `None` if the path is missing or not a regular file.
+    r"""Return file contents, or `None` if the path is missing or not a regular file.
 
     Treats directories, symlinks-to-missing-targets, and other non-file shapes
     as "no readable text" so callers surface a structural BLOCK finding instead
     of crashing the validator with `IsADirectoryError` / `OSError`.
+
+    Uses `utf-8-sig` so a UTF-8 BOM (common from Windows editors) is stripped
+    transparently rather than breaking the `^---\n` frontmatter regex.
     """
     if not path.is_file():
         return None
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8-sig")
 
 
 def _coerce_dates(payload: dict[str, Any]) -> dict[str, Any]:

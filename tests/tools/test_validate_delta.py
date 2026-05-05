@@ -48,6 +48,25 @@ def test_missing_file_returns_block_finding(tmp_path: Path) -> None:
     assert any(f.severity == "BLOCK" and "not found" in f.message.lower() for f in findings)
 
 
+def test_op_markers_only_in_rationale_blocks() -> None:
+    """Operator markers (`+ ADD:` etc.) appearing in `## Rationale` must not
+    satisfy the `## Delta` op-marker check. P5 will rely on this validator
+    before merging deltas."""
+    findings = validate.validate_delta(FIXTURES / "delta_op_markers_in_rationale_only.md")
+    assert any(
+        f.severity == "BLOCK" and "no operator markers" in f.message.lower() for f in findings
+    ), findings
+
+
+def test_loose_section_headings_block() -> None:
+    """`## Affects on consumers` and `## Delta-2 foo` must NOT pass section
+    presence — only exact `## Affects` / `## Delta` headings count."""
+    findings = validate.validate_delta(FIXTURES / "delta_loose_heading.md")
+    block_msgs = [f.message.lower() for f in findings if f.severity == "BLOCK"]
+    assert any("affects" in m for m in block_msgs), findings
+    assert any("delta" in m for m in block_msgs), findings
+
+
 def test_invalid_yaml_frontmatter_returns_block_not_traceback() -> None:
     """Malformed YAML must surface as a structured BLOCK finding."""
     findings = validate.validate_delta(FIXTURES / "delta_invalid_yaml.md")

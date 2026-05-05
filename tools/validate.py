@@ -65,6 +65,9 @@ _CONSTITUTION_ARTICLE_WARN_THRESHOLD = 12
 _CONSTITUTION_ARTICLE_BLOCK_THRESHOLD = 16
 
 _DELTA_OP_MARKER = re.compile(r"^[+\-~] (ADD|REMOVE|MODIFY):", re.MULTILINE)
+_AFFECTS_HEADER = re.compile(r"^## Affects\s*$", re.MULTILINE)
+_DELTA_HEADER = re.compile(r"^## Delta\s*$", re.MULTILINE)
+_NEXT_H2 = re.compile(r"^## ", re.MULTILINE)
 
 
 def _read_text(path: Path) -> str | None:
@@ -295,26 +298,31 @@ def validate_delta(path: Path) -> list[Finding]:
             Finding("BLOCK", "delta", path, f"frontmatter{field}: {err.message}"),
         )
 
-    framed = "\n" + body
-    if "\n## Affects" not in framed:
+    if not _AFFECTS_HEADER.search(body):
         findings.append(
             Finding("BLOCK", "delta", path, "missing required '## Affects' section"),
         )
 
-    if "\n## Delta" not in framed:
+    delta_match = _DELTA_HEADER.search(body)
+    if delta_match is None:
         findings.append(
             Finding("BLOCK", "delta", path, "missing required '## Delta' section"),
         )
-    elif not _DELTA_OP_MARKER.search(body):
-        findings.append(
-            Finding(
-                "BLOCK",
-                "delta",
-                path,
-                "## Delta section has no operator markers; "
-                "expected '+ ADD:', '- REMOVE:', or '~ MODIFY:'",
-            ),
-        )
+    else:
+        section_start = delta_match.end()
+        next_h2 = _NEXT_H2.search(body, section_start)
+        section_end = next_h2.start() if next_h2 else len(body)
+        delta_section = body[section_start:section_end]
+        if not _DELTA_OP_MARKER.search(delta_section):
+            findings.append(
+                Finding(
+                    "BLOCK",
+                    "delta",
+                    path,
+                    "## Delta section has no operator markers; "
+                    "expected '+ ADD:', '- REMOVE:', or '~ MODIFY:'",
+                ),
+            )
 
     return findings
 

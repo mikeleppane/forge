@@ -119,3 +119,21 @@ def test_repo_wide_target_with_positional_path_emits_warn(
         f["severity"] == "WARN" and "ignores positional path" in f["message"]
         for f in payload["findings"]
     )
+
+
+def test_repo_root_must_be_a_directory(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`--repo-root` pointing at a file (or any non-directory) must surface
+    a BLOCK finding instead of silently returning 'no findings'. Otherwise
+    the user thinks the repo is healthy when actually the path was wrong."""
+    not_a_dir = tmp_path / "this-is-a-file.txt"
+    not_a_dir.write_text("not a repo", encoding="utf-8")
+
+    rc = validate.main(["--target", "health", "--repo-root", str(not_a_dir)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert rc == 1
+    assert any(
+        f["severity"] == "BLOCK" and "repo-root" in f["message"].lower()
+        for f in payload["findings"]
+    ), payload

@@ -1001,7 +1001,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
 
-    findings.extend(_dispatch_target(target, args.path, args.repo_root))
+    if target in _REPO_WIDE_TARGETS and not args.repo_root.is_dir():
+        findings.append(
+            Finding(
+                "BLOCK",
+                target,
+                args.repo_root,
+                f"--repo-root {str(args.repo_root)!r} is not a directory; "
+                f"point it at the repository root containing the .idd/ tree",
+            ),
+        )
+    else:
+        findings.extend(_dispatch_target(target, args.path, args.repo_root))
 
     payload = {
         "target": target,

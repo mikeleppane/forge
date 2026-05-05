@@ -69,6 +69,16 @@ def test_missing_file_returns_block_finding(tmp_path: Path) -> None:
     assert any(f.severity == "BLOCK" and "not found" in f.message.lower() for f in findings)
 
 
+def test_single_gap_emits_single_monotonic_finding() -> None:
+    """A single missing article (`[1, 2, 4, 5, 6]`) must fire ONE monotonic
+    finding, not one per subsequent article. Resync prevents cascading
+    noise that drowns the real signal."""
+    findings = validate.validate_constitution(FIXTURES / "constitution_one_gap_many_articles.md")
+    monotonic = [f for f in findings if "monotonic" in f.message.lower()]
+    assert len(monotonic) == 1, monotonic
+    assert "expected 3" in monotonic[0].message and "found 4" in monotonic[0].message
+
+
 def test_invalid_yaml_frontmatter_returns_block_not_traceback() -> None:
     """Malformed YAML must surface as a structured BLOCK finding instead of
     crashing the CLI on a `yaml.YAMLError` traceback."""

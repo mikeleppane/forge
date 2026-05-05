@@ -203,16 +203,19 @@ def validate_constitution(path: Path) -> list[Finding]:
             continue
         article_numbers.append(int(match.group(1)))
 
-    for index, number in enumerate(article_numbers, start=1):
-        if number != index:
+    expected = 1
+    for number in article_numbers:
+        if number != expected:
             findings.append(
                 Finding(
                     "BLOCK",
                     "constitution",
                     path,
-                    f"article numbers not monotonic: expected {index}, found {number}",
+                    f"article numbers not monotonic: expected {expected}, found {number}",
                 ),
             )
+            expected = number  # resync so each gap fires once, not N times
+        expected += 1
 
     for block in _ARTICLE_BLOCK.finditer(body):
         article_no = block.group(1)
@@ -440,11 +443,17 @@ def _read_capability_from_spec(spec_path: Path) -> str | None:
 
 
 def _iter_archived_feature_specs(features_root: Path) -> list[Path]:
-    """Return SPEC.md paths under `features/archive/...`, any depth."""
+    """Return SPEC.md paths exactly one level under `features/archive/`.
+
+    Layout is `features/archive/<feature-id>/SPEC.md`; deeper SPEC.md files
+    (e.g. inside a `notes/` subfolder under an archived feature) would be
+    drafts or stray copies, not authoritative archive entries — exclude them
+    so they cannot drive false-positive collisions.
+    """
     archive_root = features_root / "archive"
     if not archive_root.is_dir():
         return []
-    return sorted(p for p in archive_root.rglob("SPEC.md") if p.is_file())
+    return sorted(p for p in archive_root.glob("*/SPEC.md") if p.is_file())
 
 
 def _collect_canonical_capabilities(idd_root: Path) -> dict[str, list[Path]]:

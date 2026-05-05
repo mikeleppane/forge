@@ -129,6 +129,18 @@ def test_state_json_schema_broken_block(tmp_path: Path) -> None:
     assert any(f.severity == "BLOCK" and "state.json" in f.message for f in findings)
 
 
+def test_state_json_as_directory_does_not_crash(tmp_path: Path) -> None:
+    """A `state.json` that is a directory (typo: `mkdir state.json`) must
+    surface as BLOCK, not crash the scan with IsADirectoryError."""
+    folder = tmp_path / ".idd" / "features" / "2026-05-04-statedir"
+    state_dir = folder / "state.json"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    findings = validate.validate_health(tmp_path)
+
+    assert any(f.severity == "BLOCK" and "state.json" in f.message for f in findings)
+
+
 def test_feature_missing_state_json_high(tmp_path: Path) -> None:
     folder = tmp_path / ".idd" / "features" / "2026-05-04-no-state"
     folder.mkdir(parents=True, exist_ok=True)

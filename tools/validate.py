@@ -71,7 +71,13 @@ _NEXT_H2 = re.compile(r"^## ", re.MULTILINE)
 
 
 def _read_text(path: Path) -> str | None:
-    if not path.exists():
+    """Return file contents, or `None` if the path is missing or not a regular file.
+
+    Treats directories, symlinks-to-missing-targets, and other non-file shapes
+    as "no readable text" so callers surface a structural BLOCK finding instead
+    of crashing the validator with `IsADirectoryError` / `OSError`.
+    """
+    if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
 

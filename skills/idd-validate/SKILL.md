@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 ## Goal
 
-Run `tools/validate.py` against a target and surface findings to the user.
+Run `python -m tools.validate` against a target and surface findings to the user.
 
 ## Inputs
 

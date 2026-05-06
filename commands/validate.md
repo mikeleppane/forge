@@ -5,7 +5,7 @@ description: Run the IDD structural validator across artifacts and surface findi
 
 # /idd:validate
 
-Run `tools/validate.py` and report findings. Read-only.
+Run `python -m tools.validate` and report findings. Read-only.
 
 ## Behavior
 
@@ -49,6 +49,14 @@ Run `tools/validate.py` and report findings. Read-only.
 
 - `--repo-root <path>` (default: cwd). Repo root for repo-wide targets and for resolving `anchors` paths.
 - `--check-registries` (default: `False`). Forwarded to `validate_verified_deps`. **Offline by default**: pass `--check-registries` for live registry probes (requires `npm` and/or `pip` on PATH). Only meaningful for `verified-deps` and `all`; ignored elsewhere.
+
+## Examples
+
+- Run repo health check: `python -m tools.validate --target health`
+- Validate a SPEC's scenarios: `python -m tools.validate --target scenarios .idd/features/<id>/SPEC.md`
+- Validate a feature folder's deviations: `python -m tools.validate --target deviations .idd/features/<id>`
+- Run every check across the .idd/ tree: `python -m tools.validate --target all`
+- Run all + live registry probes: `python -m tools.validate --target all --check-registries`
 
 ## Failure modes
 

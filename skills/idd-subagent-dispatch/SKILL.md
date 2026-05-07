@@ -41,6 +41,28 @@ Do not narrate. Do not summarize files I already gave you.
 
 The `context_budget:` block is JSON, not YAML — the PreToolUse hook parses it with `json.loads` so the plugin stays stdlib-only on the user's machine. See `idd-context-budget/SKILL.md` for the full set of keys the contract supports.
 
+The optional `articles` field carries the active feature's filtered Constitution
+articles for the subagent to honor. The orchestrating skill loads + filters
+articles via `tools.constitution.load_and_filter` at preflight, then serializes
+each via `Article.to_budget_dict()` to produce the locked shape. Shape per entry:
+
+```json
+{
+  "id": "A1",
+  "title": "Secrets via vault only",
+  "level": "CRITICAL",
+  "rule": "Secrets, API keys, ...",
+  "reference": "OWASP A02:2021",
+  "rationale": "Hard-coded credentials..."
+}
+```
+
+`body_words` is loader-internal and MUST NOT appear in the dispatch prompt.
+
+When `.idd/CONSTITUTION.md` is absent, the field is omitted entirely.
+
+**Reviewer subagents** (target=code) MUST tag any article violation in REVIEW.code.md with `[constitution:A<n>]` matching the entry's `id` field. Severity mapping: CRITICAL→HIGH, SHOULD→MEDIUM, MAY→LOW.
+
 ## Hard rules
 
 1. **No raw diffs in summaries.** Reference commits by sha + path; never paste diff hunks back to the main thread.

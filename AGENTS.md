@@ -21,6 +21,8 @@ This file lets non-Claude tools (Cursor, Aider, Codex) discover the same IDD ski
 | `idd-validate`          | `skills/idd-validate/SKILL.md`          | explicit | Run the structural and semantic validator over IDD artifacts. Per-file targets: `spec`, `plan`, `delta`, `scenarios`, `anchors`, `spec-semantic`, `plan-tasks`, `verified-deps`. Per-folder: `deviations`. Repo-wide: `constitution`, `ship`, `health`, `all`. `--check-registries` opt-in for live registry probes (offline default). Read-only. |
 | `idd-context-budget`    | `skills/idd-context-budget/SKILL.md`    | default | Refuse subagent dispatches that lack a context-budget block. |
 | `idd-subagent-dispatch` | `skills/idd-subagent-dispatch/SKILL.md` | default | Helper rules for dispatching context-bounded subagents. |
+| `idd-constitution`        | `skills/idd-constitution/SKILL.md`        | doc-only | Documents the loader+filter contract. Phase skills invoke `tools.constitution.load_and_filter` directly; this skill has `disable-model-invocation: true`. |
+| `idd-amend-constitution`  | `skills/idd-amend-constitution/SKILL.md`  | explicit | $EDITOR-driven Constitution edits with atomic-pair (Constitution + decisions.md) write, semver bump; `--bootstrap` mode seeds a starter Constitution from project signals. |
 
 "Default" auto-load = Claude Code may invoke based on description match. "Explicit" = `disable-model-invocation: true` in frontmatter; only invoked through commands or by name.
 
@@ -39,6 +41,7 @@ This file lets non-Claude tools (Cursor, Aider, Codex) discover the same IDD ski
 | `/idd:next`      | `commands/next.md`      | Show or run the next phase command for the active feature. Flags: `--feature <id>`, `--run`. |
 | `/idd:status`    | `commands/status.md`    | One-line feature status: phase, tier, last commit. Flags: `--feature <id>`, `--verbose`. |
 | `/idd:validate`  | `commands/validate.md`  | Run the structural and semantic validator. Flags: `--target <spec\|plan\|delta\|constitution\|ship\|health\|scenarios\|anchors\|spec-semantic\|plan-tasks\|verified-deps\|deviations\|all>`, optional path, `--repo-root <path>`, `--check-registries` (off by default; live registry probes for `verified-deps` / `all`). Exit 0 / 1 (BLOCK\|HIGH) / 2 (usage). |
+| `/idd:amend-constitution` | `commands/amend-constitution.md` | Open `.idd/CONSTITUTION.md` in $EDITOR for atomic edit + semver bump + decisions.md ADR entry. Pass `--bootstrap` to seed an initial Constitution from project signals. |
 
 ## Templates
 
@@ -66,6 +69,8 @@ Subagent dispatches that touch Python code MUST cite all four in the dispatch br
 ## Hooks
 
 The `hooks/` directory contains a `PreToolUse` hook that enforces the IDD subagent context-budget contract. In Claude Code it is wired automatically via `.claude-plugin/plugin.json`. In other tools, run `python3 hooks/check_budget.py` manually before each subagent dispatch.
+
+The PreToolUse budget hook is permissive on the optional `articles[]` field carrying filtered Constitution articles for subagent context (M3 P3). Tests in `tests/hooks/test_check_budget_articles.py` pin this permissiveness.
 
 ## Tool Mapping
 

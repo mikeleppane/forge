@@ -115,3 +115,36 @@ def test_filter_articles_no_critical_path() -> None:
     kept, _dropped = cn.filter_articles(articles, scope_keywords={"anything"})
     assert all(a.level in {"SHOULD", "MAY"} for a in kept)
     assert kept, "filter must not return empty when articles exist"
+
+
+def test_article_to_budget_dict_returns_locked_shape() -> None:
+    """Open Scoping #9 contract: dispatch budget JSON shape."""
+    articles = cn.parse_constitution(FIXTURES / "passing.md")
+    a1 = articles[0]
+    payload = a1.to_budget_dict()
+    assert set(payload.keys()) == {"id", "title", "level", "rule", "reference", "rationale"}
+    assert payload["id"] == "A1"
+    assert payload["level"] == "CRITICAL"
+    assert payload["title"] == a1.title
+    assert payload["rule"] == a1.rule
+    # body_words MUST NOT leak into the dispatch payload.
+    assert "body_words" not in payload
+
+
+def test_article_to_budget_dict_preserves_null_optionals() -> None:
+    """Articles without Reference/Rationale serialize them as None, not omitted."""
+    text = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-07"\n---\n\n'
+        "## Article 1 — Bare rule [SHOULD]\n"
+        "**Rule:** Be explicit.\n"
+        "**Exception:** None.\n"
+    )
+    bare = FIXTURES / "_tmp_bare.md"
+    bare.write_text(text, encoding="utf-8")
+    try:
+        articles = cn.parse_constitution(bare)
+    finally:
+        bare.unlink()
+    payload = articles[0].to_budget_dict()
+    assert payload["reference"] is None
+    assert payload["rationale"] is None

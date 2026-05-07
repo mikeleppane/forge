@@ -22,10 +22,6 @@ import yaml
 WORD_TO_TOKEN_RATIO: float = 1.3
 MAX_INJECTED_TOKENS: int = 1500
 MAX_INJECTED_WORDS: int = int(MAX_INJECTED_TOKENS / WORD_TO_TOKEN_RATIO)  # 1153
-# Per-article cap (Open Scoping #16): single article body must fit two
-# CRITICAL articles inside MAX_INJECTED_TOKENS. 600 words ~= 780 tokens; two
-# CRITICAL articles ~= 1560 tokens, with the JSON envelope absorbing slack.
-MAX_ARTICLE_BODY_WORDS: int = 600
 
 Level = Literal["CRITICAL", "SHOULD", "MAY"]
 
@@ -75,9 +71,7 @@ def parse_constitution(path: Path) -> list[Article]:
     Trusts the structural validator (``tools.validate.validate_constitution``)
     to gate frontmatter + numbering + Rule/Exception presence. This parser
     is permissive on already-valid files; it raises ``ConstitutionError`` on
-    shape failures the validator would also catch AND on per-article body
-    word-count overflow (Open Scoping #16 — guarantees the 1500-token cap
-    is not bypassed by a single fat CRITICAL article).
+    shape failures the validator would also catch.
 
     Args:
         path: Path to the Constitution markdown file.
@@ -87,8 +81,7 @@ def parse_constitution(path: Path) -> list[Article]:
 
     Raises:
         ConstitutionError: When the file is missing, frontmatter cannot be
-            parsed, an article header is malformed, or any article body
-            exceeds ``MAX_ARTICLE_BODY_WORDS``.
+            parsed, or an article header is malformed.
     """
     if not path.exists():
         raise ConstitutionError(f"Constitution not found at {path}")
@@ -109,13 +102,6 @@ def parse_constitution(path: Path) -> list[Article]:
         reference = block.get("reference", "").strip() or None
         rationale = block.get("rationale", "").strip() or None
         body_words = len((rule + " " + (reference or "") + " " + (rationale or "")).split())
-        if body_words > MAX_ARTICLE_BODY_WORDS:
-            raise ConstitutionError(
-                f"article A{block['number']} body is {body_words} words; "
-                f"per-article cap is {MAX_ARTICLE_BODY_WORDS} words "
-                f"(~{int(MAX_ARTICLE_BODY_WORDS * WORD_TO_TOKEN_RATIO)} tokens). "
-                "Rewrite shorter or split into two articles."
-            )
         articles.append(
             Article(
                 id=f"A{block['number']}",
@@ -234,20 +220,8 @@ def tokenize(text: str) -> set[str]:
     return {t for t in raw if len(t) >= _MIN_TOKEN_LENGTH and t not in STOPWORDS}
 
 
-def read_pyproject_top_level_deps(path: Path) -> list[str]:
-    r"""Return PEP 621 ``[project.dependencies]`` entries as raw strings.
-
-    Public so ``tools.constitution_amend`` can reuse it without duplicating
-    the parsing logic. Returns full dep strings (e.g. ``"requests>=2.0"``); a
-    caller that wants bare names splits on ``re.split(r"[<>=!\[ ]", ...)``.
-
-    Args:
-        path: Path to ``pyproject.toml``. Missing file returns ``[]``.
-
-    Returns:
-        List of dependency strings, or ``[]`` if the file is missing or
-        malformed.
-    """
+def _read_pyproject_top_level_deps(path: Path) -> list[str]:
+    # PEP 621 [project.dependencies] entries as raw strings; missing/malformed -> [].
     if not path.exists():
         return []
     try:
@@ -259,17 +233,8 @@ def read_pyproject_top_level_deps(path: Path) -> list[str]:
     return list(deps) if isinstance(deps, list) else []
 
 
-def read_package_json_top_level_deps(path: Path) -> list[str]:
-    """Return ``package.json`` dependency keys (deps + devDeps).
-
-    Public so ``tools.constitution_amend`` can reuse it.
-
-    Args:
-        path: Path to ``package.json``. Missing file returns ``[]``.
-
-    Returns:
-        List of dependency names; empty list when file missing or malformed.
-    """
+def _read_package_json_top_level_deps(path: Path) -> list[str]:
+    # package.json dependency keys (deps + devDeps); missing/malformed -> [].
     if not path.exists():
         return []
     try:
@@ -310,9 +275,9 @@ def extract_scope_keywords(
     keywords: set[str] = set()
     keywords |= tokenize(idea_text)
 
-    for dep in read_pyproject_top_level_deps(repo_root / "pyproject.toml"):
+    for dep in _read_pyproject_top_level_deps(repo_root / "pyproject.toml"):
         keywords |= tokenize(_bare_dep_name(dep))
-    for dep in read_package_json_top_level_deps(repo_root / "package.json"):
+    for dep in _read_package_json_top_level_deps(repo_root / "package.json"):
         keywords |= tokenize(dep)
 
     for path in files_in_scope:

@@ -238,12 +238,28 @@ _VERIFIED_DEPS_BLOCK = re.compile(
     r"(?ms)^## Verified Dependencies\b[^\n]*\n(?P<body>.*?)(?=^## |\Z)"
 )
 _TABLE_ROW = re.compile(r"^\|(?P<row>.*)\|\s*$", re.MULTILINE)
-_REQUIRED_COLUMNS: tuple[str, ...] = ("package", "version range", "registry")
+# All six columns from master design §7.3 are required to land in the header.
+# Per-row content rules (non-empty package/version/source/key-apis, no `*`
+# wildcard) live below in `_check_data_row`.
+_REQUIRED_COLUMNS: tuple[str, ...] = (
+    "package",
+    "version range",
+    "registry",
+    "source checked",
+    "key apis used",
+    "notes",
+)
 _KNOWN_ECOSYSTEMS: frozenset[str] = frozenset(
     {"npm", "pypi", "crates", "go", "maven", "nuget", "gem"}
 )
 _SEPARATOR_ROW = re.compile(r"^[\s|:\-]+$")
 _REGISTRY_PROBE_TIMEOUT_SECONDS = 5
+# Slug check applied before a package name reaches `npm view <pkg>` /
+# `pip index versions <pkg>` argv. Rejects leading dashes (would be parsed as
+# a flag), shell metacharacters, and whitespace. Permits npm scoped names
+# (`@scope/pkg`), Python distributions (`my-lib`), and Go module paths
+# (`github.com/foo/bar`).
+_PKG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./@\-]*$")
 
 
 def _split_table_row(raw: str) -> list[str]:
@@ -335,57 +351,151 @@ def validate_verified_deps(plan_path: Path, *, check_registries: bool = False) -
             )
         ]
 
-    pkg_idx = header_cells.index("package")
-    reg_idx = header_cells.index("registry")
+    indices = {col: header_cells.index(col) for col in _REQUIRED_COLUMNS}
+    header_width = len(header_cells)
 
     for raw in data_rows:
-        cells = _split_table_row(raw)
-        if len(cells) <= max(pkg_idx, reg_idx):
-            findings.append(
-                Finding(
-                    "HIGH",
-                    "verified-deps",
-                    plan_path,
-                    f"Verified Dependencies row underfilled: {raw!r}",
-                )
+        findings.extend(
+            _check_data_row(
+                plan_path=plan_path,
+                raw=raw,
+                indices=indices,
+                header_width=header_width,
+                check_registries=check_registries,
             )
-            continue
-        package = _clean_scope_entry(cells[pkg_idx])
-        registry = cells[reg_idx].lower()
-        if not registry:
-            findings.append(
-                Finding(
-                    "HIGH",
-                    "verified-deps",
-                    plan_path,
-                    f"Verified Dependencies row missing registry: {raw!r}",
-                )
-            )
-            continue
-        if registry not in _KNOWN_ECOSYSTEMS:
-            findings.append(
-                Finding(
-                    "HIGH",
-                    "verified-deps",
-                    plan_path,
-                    f"unknown ecosystem {registry!r}",
-                )
-            )
-            continue
-        if check_registries:
-            findings.extend(_probe_registry(plan_path, package, registry))
+        )
 
     return findings
 
 
+def _check_data_row(
+    *,
+    plan_path: Path,
+    raw: str,
+    indices: dict[str, int],
+    header_width: int,
+    check_registries: bool,
+) -> list[Finding]:
+    """Validate a single Verified Dependencies data row per design §7.3.
+
+    Per master design §7.3 rules: package and version cells must be non-empty,
+    version cannot be the bare ``*`` wildcard, source-checked and key-APIs-used
+    cells must be non-empty (the conditional Constitution-article rule on key
+    APIs is folded into the unconditional non-empty check). Registry must
+    match the known ecosystem set. Notes is allowed empty.
+
+    The cell rules are evaluated in priority order via a tuple-driven table
+    so each new rule is a one-line addition rather than another `return`.
+    """
+    cells = _split_table_row(raw)
+    # `_split_table_row` legitimately strips trailing empty cells produced by
+    # the bracketing pipes (so `| a | b |` returns ["a", "b"]). For strict
+    # column-count checks we still want a HIGH when the author actually
+    # under-fills a row (skips interior pipes), but a row that ends in a
+    # legitimately-blank Notes cell must not flag. Heuristic: if the cell
+    # count is short by more than one, the row is under-piped — flag HIGH.
+    # Otherwise pad missing trailing cells with "" so per-cell lookups don't
+    # IndexError.
+    if len(cells) < header_width - 1:
+        return [
+            Finding(
+                "HIGH",
+                "verified-deps",
+                plan_path,
+                f"Verified Dependencies row underfilled: {raw!r}",
+            )
+        ]
+    cells = cells + [""] * (header_width - len(cells))
+
+    package = _clean_scope_entry(cells[indices["package"]])
+    version = _clean_scope_entry(cells[indices["version range"]])
+    registry = cells[indices["registry"]].strip().lower()
+    source = _clean_scope_entry(cells[indices["source checked"]])
+    key_apis = _clean_scope_entry(cells[indices["key apis used"]])
+
+    msg = _row_content_failure(
+        raw=raw,
+        package=package,
+        version=version,
+        source=source,
+        key_apis=key_apis,
+        registry=registry,
+    )
+    if msg is not None:
+        return [Finding("HIGH", "verified-deps", plan_path, msg)]
+    if check_registries:
+        return _probe_registry(plan_path, package, registry)
+    return []
+
+
+def _row_content_failure(
+    *,
+    raw: str,
+    package: str,
+    version: str,
+    source: str,
+    key_apis: str,
+    registry: str,
+) -> str | None:
+    """First failing per-row §7.3 rule, or None if every cell rule passes."""
+    if not package:
+        return f"Verified Dependencies row missing package name: {raw!r}"
+    rules: tuple[tuple[bool, str], ...] = (
+        (
+            not version,
+            f"Verified Dependencies row for {package!r} missing version (design §7.3)",
+        ),
+        (
+            version == "*",
+            f"Verified Dependencies row for {package!r} uses wildcard '*'; "
+            f"pin to an exact version or a tight range (design §7.3)",
+        ),
+        (
+            not source,
+            f"Verified Dependencies row for {package!r} missing 'Source checked' (design §7.3)",
+        ),
+        (
+            not key_apis,
+            f"Verified Dependencies row for {package!r} missing 'Key APIs used' (design §7.3)",
+        ),
+        (
+            not registry,
+            f"Verified Dependencies row for {package!r} missing registry: {raw!r}",
+        ),
+        (
+            bool(registry) and registry not in _KNOWN_ECOSYSTEMS,
+            f"unknown ecosystem {registry!r}",
+        ),
+    )
+    for fired, message in rules:
+        if fired:
+            return message
+    return None
+
+
+_REGISTRY_PROBE_CMDS: dict[str, tuple[str, ...]] = {
+    "npm": ("npm", "view", "{pkg}", "versions", "--json"),
+    "pypi": ("pip", "index", "versions", "{pkg}"),
+}
+
+
 def _probe_registry(plan_path: Path, package: str, registry: str) -> list[Finding]:
     """Shell out to the registry CLI; map exit/timeout/missing-CLI to findings."""
-    cmd: list[str]
-    if registry == "npm":
-        cmd = ["npm", "view", package, "versions", "--json"]
-    elif registry == "pypi":
-        cmd = ["pip", "index", "versions", package]
-    else:
+    # Argv-injection guard: a PLAN.md row whose Package cell starts with `-`
+    # would otherwise become a flag to npm/pip. Reject with HIGH so an
+    # offline reviewer sees the malformed row before any subprocess fires.
+    if not _PKG_NAME_RE.match(package):
+        return [
+            Finding(
+                "HIGH",
+                "verified-deps",
+                plan_path,
+                f"Verified Dependencies package name {package!r} is not a valid identifier",
+            )
+        ]
+
+    template = _REGISTRY_PROBE_CMDS.get(registry)
+    if template is None:
         return [
             Finding(
                 "WARN",
@@ -394,6 +504,7 @@ def _probe_registry(plan_path: Path, package: str, registry: str) -> list[Findin
                 f"registry probe not implemented for {registry}",
             )
         ]
+    cmd = [tok.format(pkg=package) for tok in template]
 
     if shutil.which(cmd[0]) is None:
         return [
@@ -405,6 +516,16 @@ def _probe_registry(plan_path: Path, package: str, registry: str) -> list[Findin
             )
         ]
 
+    return _run_probe(plan_path, package, registry, cmd)
+
+
+def _run_probe(
+    plan_path: Path,
+    package: str,
+    registry: str,
+    cmd: list[str],
+) -> list[Finding]:
+    """Execute the probe subprocess and translate exit / timeout / OS errors."""
     try:
         result = subprocess.run(
             cmd,
@@ -420,6 +541,17 @@ def _probe_registry(plan_path: Path, package: str, registry: str) -> list[Findin
                 "verified-deps",
                 plan_path,
                 f"registry probe timed out for {package}",
+            )
+        ]
+    except OSError as exc:
+        # Broken-pipe shim, permission denied, etc. — degrade to WARN so a
+        # later row's HIGH finding (or a clean run) still reaches the user.
+        return [
+            Finding(
+                "WARN",
+                "verified-deps",
+                plan_path,
+                f"registry probe failed for {package}: {exc}",
             )
         ]
 

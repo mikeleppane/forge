@@ -117,6 +117,13 @@ def test_idd_plan_tasks_parity(fixture_dir: str, should_gate: bool) -> None:
         # Unknown ecosystem is a HIGH gate — the table claims support for a
         # registry the validator does not recognize.
         ("verified_deps_unknown_ecosystem.md", True),
+        # Per-row content checks (master design §7.3): empty package, version,
+        # source-checked, key-APIs, and the bare `*` wildcard all gate HIGH.
+        ("verified_deps_empty_package.md", True),
+        ("verified_deps_empty_version.md", True),
+        ("verified_deps_wildcard_version.md", True),
+        ("verified_deps_empty_source_checked.md", True),
+        ("verified_deps_empty_key_apis.md", True),
     ],
 )
 def test_idd_plan_verified_deps_parity(fixture: str, should_gate: bool) -> None:

@@ -165,3 +165,87 @@ def test_verified_deps_check_registries_nonzero_high(
         check_registries=True,
     )
     assert any(f.severity == "HIGH" and "not found in npm" in f.message for f in findings)
+
+
+def test_verified_deps_empty_package_high() -> None:
+    """Per master design §7.3: package cell MUST be non-empty."""
+    findings = validate.validate_verified_deps(FIX / "verified_deps_empty_package.md")
+    assert any(f.severity == "HIGH" and "missing package" in f.message.lower() for f in findings), [
+        f.message for f in findings
+    ]
+
+
+def test_verified_deps_empty_version_high() -> None:
+    """Per master design §7.3: version cell MUST be non-empty."""
+    findings = validate.validate_verified_deps(FIX / "verified_deps_empty_version.md")
+    assert any(f.severity == "HIGH" and "missing version" in f.message.lower() for f in findings), [
+        f.message for f in findings
+    ]
+
+
+def test_verified_deps_wildcard_version_high() -> None:
+    """Per master design §7.3: bare '*' wildcard rejected."""
+    findings = validate.validate_verified_deps(FIX / "verified_deps_wildcard_version.md")
+    assert any(f.severity == "HIGH" and "wildcard" in f.message.lower() for f in findings), [
+        f.message for f in findings
+    ]
+
+
+def test_verified_deps_empty_source_checked_high() -> None:
+    """Per master design §7.3: source-checked cell MUST be non-empty."""
+    findings = validate.validate_verified_deps(FIX / "verified_deps_empty_source_checked.md")
+    assert any(f.severity == "HIGH" and "source checked" in f.message.lower() for f in findings), [
+        f.message for f in findings
+    ]
+
+
+def test_verified_deps_empty_key_apis_high() -> None:
+    """Per master design §7.3: Key APIs cell MUST be non-empty."""
+    findings = validate.validate_verified_deps(FIX / "verified_deps_empty_key_apis.md")
+    assert any(f.severity == "HIGH" and "key apis" in f.message.lower() for f in findings), [
+        f.message for f in findings
+    ]
+
+
+def test_verified_deps_argv_injection_package_high(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Package names that would parse as flags ('--debug', etc.) must be
+    rejected before reaching `npm view` / `pip index versions` argv. Slug
+    check fires inside the registry probe, so `check_registries=True` and a
+    fake `shutil.which` are required to reach that branch.
+    """
+
+    def fail_if_called(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("subprocess.run must not run for an invalid package name")
+
+    monkeypatch.setattr("tools.validate.plan.shutil.which", lambda _cmd: "/usr/bin/fake")
+    monkeypatch.setattr("tools.validate.plan.subprocess.run", fail_if_called)
+
+    findings = validate.validate_verified_deps(
+        FIX / "verified_deps_argv_injection_package.md",
+        check_registries=True,
+    )
+    assert any(f.severity == "HIGH" and "valid identifier" in f.message for f in findings), [
+        f.message for f in findings
+    ]
+
+
+def test_verified_deps_check_registries_oserror_warns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subprocess OSError (broken pipe / permission denied) surfaces as WARN,
+    not an unhandled crash that aborts the rest of the validator run.
+    """
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise PermissionError("registry CLI shim refused")
+
+    monkeypatch.setattr("tools.validate.plan.shutil.which", lambda _cmd: "/usr/bin/fake")
+    monkeypatch.setattr("tools.validate.plan.subprocess.run", boom)
+
+    findings = validate.validate_verified_deps(
+        FIX / "verified_deps_pass.md",
+        check_registries=True,
+    )
+    assert any(f.severity == "WARN" and "registry probe failed" in f.message for f in findings), [
+        f.message for f in findings
+    ]

@@ -20,8 +20,7 @@ from tools.validate.tdd_evidence import validate_tdd_evidence
 
 def _write_spec(feature_dir: Path, ac_count: int = 1) -> None:
     lines = ["---", "id: 2026-05-08-tdd-fixture", "---", "", "# Acceptance Criteria", ""]
-    for idx in range(1, ac_count + 1):
-        lines.append(f"{idx}. AC number {idx} description")
+    lines.extend(f"{idx}. AC number {idx} description" for idx in range(1, ac_count + 1))
     lines.append("")
     (feature_dir / "SPEC.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -47,8 +46,7 @@ def _write_slice(feature_dir: Path, slice_n: int, ac_to_shas: dict[str, list[str
     """
     lines = [f"# Slice {slice_n} summary", ""]
     for ac_id, shas in ac_to_shas.items():
-        for sha in shas:
-            lines.append(f"{ac_id}: {sha}")
+        lines.extend(f"{ac_id}: {sha}" for sha in shas)
     (feature_dir / f"slice-{slice_n}.summary").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -92,9 +90,7 @@ def test_tdd_evidence_paired_commit_passes(tmp_path: Path) -> None:
     _write_slice(feature_dir, 1, {"AC-1": ["aaaaaaa", "bbbbbbb"]})
 
     git_show = _git_show({"aaaaaaa": ["tests/tools/test_foo.py"]})
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show)
 
     assert findings == []
 
@@ -115,13 +111,11 @@ def test_tdd_evidence_missing_test_blocks(tmp_path: Path) -> None:
     )
     _write_slice(feature_dir, 1, {"AC-1": ["1111111"]})
 
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files)
 
-    assert any(
-        f.severity == "BLOCK" and "missing_test_pair" in f.message for f in findings
-    ), [(f.severity, f.message) for f in findings]
+    assert any(f.severity == "BLOCK" and "missing_test_pair" in f.message for f in findings), [
+        (f.severity, f.message) for f in findings
+    ]
 
 
 def test_tdd_evidence_test_after_impl_blocks(tmp_path: Path) -> None:
@@ -147,9 +141,7 @@ def test_tdd_evidence_test_after_impl_blocks(tmp_path: Path) -> None:
     _write_slice(feature_dir, 1, {"AC-1": ["2222222", "3333333"]})
 
     git_show = _git_show({"3333333": ["tests/tools/test_x.py"]})
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show)
 
     blocks = [f for f in findings if f.severity == "BLOCK"]
     assert blocks, "ordering violation must surface a BLOCK"
@@ -176,13 +168,9 @@ def test_tdd_evidence_exception_adr_skips_pairing(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files)
 
-    assert all(f.severity != "BLOCK" for f in findings), [
-        (f.severity, f.message) for f in findings
-    ]
+    assert all(f.severity != "BLOCK" for f in findings), [(f.severity, f.message) for f in findings]
 
 
 def test_tdd_evidence_suspicious_test_commit_low(tmp_path: Path) -> None:
@@ -213,9 +201,7 @@ def test_tdd_evidence_suspicious_test_commit_low(tmp_path: Path) -> None:
             "6666666": ["tools/foo.py"],
         }
     )
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show)
 
     lows = [f for f in findings if f.severity == "LOW"]
     assert lows, "test commit touching production paths must surface LOW finding"
@@ -239,16 +225,11 @@ def test_tdd_evidence_refactor_skipped_with_info(tmp_path: Path) -> None:
     _write_slice(feature_dir, 1, {"AC-1": ["7777777"]})
 
     git_show = _git_show({"7777777": ["tools/foo.py"]})
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show)
 
-    assert all(f.severity != "BLOCK" for f in findings), [
-        (f.severity, f.message) for f in findings
-    ]
+    assert all(f.severity != "BLOCK" for f in findings), [(f.severity, f.message) for f in findings]
     assert any(
-        f.severity == "INFO" and "refactor_touches_production" in f.message
-        for f in findings
+        f.severity == "INFO" and "refactor_touches_production" in f.message for f in findings
     ), [(f.severity, f.message) for f in findings]
 
 
@@ -268,13 +249,9 @@ def test_tdd_evidence_docs_only_no_block(tmp_path: Path) -> None:
     )
     _write_slice(feature_dir, 1, {"AC-1": ["8888888"]})
 
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files)
 
-    assert all(f.severity != "BLOCK" for f in findings), [
-        (f.severity, f.message) for f in findings
-    ]
+    assert all(f.severity != "BLOCK" for f in findings), [(f.severity, f.message) for f in findings]
 
 
 def test_tdd_evidence_feature_missing_blocks(tmp_path: Path) -> None:
@@ -310,9 +287,7 @@ def test_tdd_evidence_findings_sorted_deterministically(tmp_path: Path) -> None:
     )
     _write_slice(feature_dir, 1, {"AC-1": ["ccccccc"], "AC-2": ["ddddddd"]})
 
-    findings = validate_tdd_evidence(
-        tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files
-    )
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files)
 
     blocks = [f for f in findings if f.severity == "BLOCK"]
     assert len(blocks) == 2

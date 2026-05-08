@@ -28,6 +28,7 @@ from .spec_structural import (
     validate_negative_requirements,
 )
 from .state_semantic import validate_deviations
+from .tdd_evidence import validate_tdd_evidence
 
 __all__ = [
     "EXIT_NONZERO_SEVERITIES",
@@ -46,5 +47,6 @@ __all__ = [
     "validate_negative_requirements",
     "validate_plan_tasks",
     "validate_scenarios",
+    "validate_tdd_evidence",
     "validate_verified_deps",
 ]

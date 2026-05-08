@@ -28,6 +28,7 @@ from .spec_structural import (
     validate_negative_requirements,
 )
 from .state_semantic import validate_deviations
+from .tdd_evidence import validate_tdd_evidence
 
 _PER_FILE_TARGETS: frozenset[str] = frozenset(
     {
@@ -41,7 +42,7 @@ _PER_FILE_TARGETS: frozenset[str] = frozenset(
         "verified-deps",
     }
 )
-_PER_FOLDER_TARGETS: frozenset[str] = frozenset({"deviations"})
+_PER_FOLDER_TARGETS: frozenset[str] = frozenset({"deviations", "tdd_evidence"})
 _REPO_WIDE_TARGETS: frozenset[str] = frozenset({"health", "ship", "all"})
 
 _TARGET_CHOICES: tuple[str, ...] = (
@@ -54,6 +55,7 @@ _TARGET_CHOICES: tuple[str, ...] = (
     "plan-tasks",
     "verified-deps",
     "deviations",
+    "tdd_evidence",
     "constitution",
     "health",
     "ship",
@@ -113,6 +115,10 @@ def _dispatch_deviations(args: argparse.Namespace, repo_root: Path) -> list[Find
     return list(validate_deviations(args.path))
 
 
+def _dispatch_tdd_evidence(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
+    return list(validate_tdd_evidence(repo_root, args.path.name))
+
+
 def _dispatch_constitution(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
     resolved = args.path if args.path is not None else repo_root / ".forge" / "CONSTITUTION.md"
     return list(validate_constitution(resolved))
@@ -161,6 +167,7 @@ def _dispatch_all(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
             if not feature.is_dir():
                 continue
             findings.extend(validate_deviations(feature))
+            findings.extend(validate_tdd_evidence(repo_root, feature.name))
             spec = feature / SPEC_FILENAME
             plan = feature / PLAN_FILENAME
             if spec.is_file():
@@ -188,6 +195,7 @@ _TARGET_DISPATCH: dict[str, Callable[[argparse.Namespace, Path], list[Finding]]]
     "plan-tasks": _dispatch_plan_tasks,
     "verified-deps": _dispatch_verified_deps,
     "deviations": _dispatch_deviations,
+    "tdd_evidence": _dispatch_tdd_evidence,
     "constitution": _dispatch_constitution,
     "health": _dispatch_health,
     "ship": _dispatch_ship,

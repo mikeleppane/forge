@@ -28,19 +28,36 @@ The plain name `.idd/features/<id>/REVIEW.md` is reserved (do not write it). Dow
 ## Steps
 
 1. **Validate state.** Read `state.json`; abort if not in review phase.
+1.5. **Constitution preflight.** Call `tools.constitution.load_and_filter(repo_root, idea_text=<spec_intent>, files_in_scope=<spec_anchors_or_plan_files>)`. For target=code, the resulting `articles[]` (serialized via `Article.to_budget_dict()`) MUST be included in the heavy-subagent dispatch budget. **When `len(articles) > 0` AND target=code, the heavy pass is mandatory** — it cannot be skipped on a clean self-review (closes the self-review skip gap; see Open Scoping #13). The reviewer subagent tags every article violation in REVIEW.code.md with `[constitution:A<n>]` (e.g. `[constitution:A1] HIGH src/foo.py:42 — direct session call`). Severity mapping: CRITICAL→HIGH, SHOULD→MEDIUM, MAY→LOW.
 2. **Mark active target.** Call `tools.state.set_review_target(path, review_target=<plan|code>)` so `phases.review.current_target` reflects which pass is in flight. Idempotent within an in-progress review — safe to call once per skill invocation.
 3. **Copy template** if `REVIEW.<target>.md` does not exist: write `.idd/features/<id>/REVIEW.<target>.md` from `templates/feature/REVIEW.md` with frontmatter: `spec: <feature-id>`, `target: <plan|code>`, `status: open`, `cycles: 1`.
 4. **Cycle N — Self-review pass.**
    - For target=plan: walk every slice. Check (a) every acceptance criterion mapped to exactly one slice; (b) every file in scope appears in exactly one slice unless shared; (c) Verified Dependencies non-empty when new deps; (d) wave dependencies make sense (no Wave 2 task depends on a Wave 3 task).
    - For target=code: walk every commit since spec creation. Check (a) commit message follows Conventional Commits with allowed scope; (b) commit content matches one PLAN.md task; (c) tests added or modified for new behavior; (d) no obvious misalignment with SPEC § Negative Requirements.
    - Append findings to the per-target `REVIEW.<target>.md` § Findings with `Source: self`. Severity: BLOCK / HIGH / MEDIUM / LOW.
-5. **Cycle N — Heavy subagent pass (only when self-review surfaces ≥ 1 HIGH+ finding OR user explicitly requests `--heavy`).**
-   - Dispatch ONE review subagent. Apply the `idd-context-budget` skill rules and `idd-subagent-dispatch` shape. The PreToolUse hook (`hooks/check_budget.py`) blocks malformed dispatches mechanically.
-   - Budget: SPEC § Acceptance + Negative Requirements + UNDERSTANDING § Pre-Mortem; for target=code, also `git diff --stat` plus the touched files.
-   - Task: produce findings the self-pass missed. Same severity scale.
+5. **Cycle N — Heavy subagent pass.** Triggered when ANY of:
+   - self-review surfaced ≥ 1 HIGH+ finding, OR
+   - user explicitly requested `--heavy`, OR
+   - **`target == "code"` AND `len(articles) > 0`** — closes the self-review skip gap (Open Scoping #13). Without this rule a Constitution violation that self-review misses would never get tagged, and the §5.3.9 ship gate would see nothing.
+
+   Steps:
+   - Dispatch ONE review subagent. Apply the `idd-context-budget` skill rules and `idd-subagent-dispatch` shape. The PreToolUse hook (`hooks/check_budget.py`) tolerates the optional `articles` budget field.
+   - Budget: SPEC § Acceptance + Negative Requirements + UNDERSTANDING § Pre-Mortem; for target=code, also `git diff --stat` plus the touched files. The `articles` budget field carries the filtered Constitution articles serialized via `Article.to_budget_dict()` (Task 5).
+   - Task: produce findings the self-pass missed. For target=code, additionally check the diff against every article in `articles`. **Tag every article-related finding** in the REVIEW.code.md row's Problem column with `[constitution:A<n>]` (matching the article's `id`). Severity mapping for article violations:
+     - CRITICAL article → HIGH severity finding.
+     - SHOULD article → MEDIUM severity finding.
+     - MAY article → LOW severity finding.
+
+     Every emitted row MUST include `Status: open` so the §5.3.9 ship gate can identify unresolved findings.
+
+     Example finding row:
+
+     | F-7 | HIGH | open | src/services/checkout.py:142 | [constitution:A1] direct ORM session call in service layer (Article 1 — Repository pattern) | move to `repository/checkout.py` | heavy-subagent |
    - Append findings to `REVIEW.<target>.md` with `Source: heavy-subagent`.
 6. **Update Convergence Log row** for cycle N in `REVIEW.<target>.md`: findings opened, findings resolved (the planning agent or user resolved them), HIGH+ remaining.
 7. **Drive convergence.**
+   - When a finding is resolved (code or spec edit), update its row's `Status` from `open` to `resolved` in `REVIEW.<target>.md`.
+   - When the user logs an exception in `decisions.md` referencing the finding id, update the row's `Status` to `accepted-risk`.
    - If HIGH+ remaining > 0 AND cycle N < 3: surface findings to user, accept resolutions (edits to SPEC / PLAN / code or accepted-risk entries in `decisions.md`), bump `REVIEW.<target>.md` frontmatter `cycles: N+1`, repeat steps 4–6.
    - If HIGH+ remaining > 0 AND cycle N == 3: keep `REVIEW.<target>.md` frontmatter `status: open`, surface to user with full residual list, halt without transitioning state. Document blocker in `decisions.md` § Open.
    - If HIGH+ remaining == 0: set `REVIEW.<target>.md` frontmatter `status: resolved`, proceed.

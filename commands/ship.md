@@ -16,6 +16,18 @@ Run the IDD ship phase against the active feature.
 5. Invoke the `idd-ship` skill. The skill calls `tools.archive.ship_feature` — a single transactional helper that runs an all-or-nothing preflight (`.idd/features/<id>/` exists, `.idd/features/archive/<id>/` absent, `.idd/specs/<capability>/SPEC.md` absent), then writes the canonical spec, then archives the feature folder, rolling back the canonical write if the archive move fails. On any preflight collision, the helper raises `ArchiveError` ("capability already shipped — delta proposals (M3+) required for changes"); the skill logs to `decisions.md` § Open and halts.
 6. On completion, print canonical spec path, archive path, capability slug, next step (none — feature done).
 
+## Constitution gate (M3 §5.3.9)
+
+When `.idd/CONSTITUTION.md` is present, `/idd:ship` parses `REVIEW.code.md` for findings tagged `[constitution:A<n>]` whose `Status` is `open` and partitions them by article level:
+
+- **CRITICAL** + severity ≥ MEDIUM → gate prompt; user must resolve, log exception (Status: accepted-risk), or type `ACKNOWLEDGE` exactly.
+- **SHOULD** + severity ≥ MEDIUM → printed once in ship summary; not gated.
+- **MAY** or severity < MEDIUM → informational only.
+
+On `ACKNOWLEDGE`, the feature ships with `state.json.deviations[]` appended (`phase: "ship"`, `resolution: "user_acknowledged"`) and a `decisions.md` entry. The ACK mutation runs INSIDE `tools.archive.ship_feature(pre_archive_hook=...)` so a preflight failure cannot leave a ghost deviation. Audit trail survives the archive.
+
+Findings whose `Status` is `resolved` or `accepted-risk` are convergence-loop history and are NOT surfaced — the gate acts on unresolved findings only.
+
 ## Failure modes
 
 - `tier == "focused"` → abort: "Focused tier finishes at /idd:verify; ship is standard / full only."

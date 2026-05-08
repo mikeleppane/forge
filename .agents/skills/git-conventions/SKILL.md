@@ -42,7 +42,7 @@ All three parts carry weight: the subject catches attention, the body records mo
 feat(tools): split state transitions into start/complete/finish
 ```
 
-- **Max 72 characters** (≤50 ideal). **Lowercase** after the colon. **Imperative mood** ("add", not "added"). **No trailing period.**
+- **Target ≤72 characters** (≤50 ideal); **soft cap 90 chars** for unusual cases like spec-section anchors (e.g. `(§5.3.9)`). Don't sacrifice clarity for length. **Lowercase** after the colon. **Imperative mood** ("add", not "added"). **No trailing period.**
 - **Be specific** — describe *what changed*, not *what you did*. `validate state.json with format-aware schema check` beats `update validator`.
 
 ---
@@ -336,7 +336,7 @@ git reflog   # discarded-work recovery, ~90 days
 Before every commit:
 
 - [ ] Single logical change
-- [ ] Subject: `type(scope): imperative subject`, ≤72 chars, lowercase, no trailing period
+- [ ] Subject: `type(scope): imperative subject`, target ≤72 chars (soft cap 90), lowercase, no trailing period
 - [ ] Scope from the table above (or a new one with clear reason)
 - [ ] Body explains the *why* (or the change is trivial enough to skip)
 - [ ] Breaking changes carry both `!` and `BREAKING CHANGE:` footer

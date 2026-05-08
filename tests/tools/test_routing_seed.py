@@ -1,10 +1,11 @@
-"""Tests for ``tools.routing.seed_routed_feature`` (M3 P6.1 T1 contract).
+"""Tests for ``tools.routing.seed_routed_feature`` (M3 P6.1 T1 + P6.2 T2 contract).
 
 The helper composes :func:`tools.archive.create_feature_folder` (T2) and
 :func:`tools.state.record_routing_decision` (P1) with a post-seed cleanup
 wrapper backed by :func:`tools.archive.cleanup_seeded_feature` (T0.5).  All
 schema validation runs against ``schemas/state.schema.json`` BEFORE any disk
-mutation; ``--full`` raises :class:`NotImplementedError` until P6.2 lands.
+mutation.  As of P6.2, ``--full`` seeds normally with
+``current_phase="refine"``; focused/standard seed with ``current_phase="spec"``.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import jsonschema
 import pytest
 
 from tools import routing
@@ -120,29 +122,117 @@ def test_seed_routed_feature_standard_happy_path(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# --full and bogus tier — both refuse BEFORE any disk mutation
+# Full-tier seed — P6.2 contract (refine entry phase, refine⇒full locked)
 # ---------------------------------------------------------------------------
 
 
-def test_seed_routed_feature_full_raises_not_implemented(tmp_path: Path) -> None:
-    """--full path raises NotImplementedError with a P6.2 pointer; no folder."""
+def test_seed_routed_feature_full_tier_happy_path(tmp_path: Path) -> None:
+    """Full tier seed: returns folder; state.json carries current_phase=refine + routing block."""
     repo = _stage_repo(tmp_path)
 
-    with pytest.raises(NotImplementedError) as excinfo:
+    folder = seed_routed_feature(
+        repo,
+        idea="rebuild the orchestrator from scratch",
+        final_tier="full",
+        proposed_tier="full",
+        rationale="cross-cutting architectural change",
+        constitution_present=True,
+        today=TODAY,
+    )
+
+    assert folder.is_dir()
+    payload = _read_state(folder)
+    assert payload["tier"] == "full"
+    assert payload["current_phase"] == "refine"
+    assert payload["phases"]["refine"]["status"] == "in_progress"
+    assert "started_at" in payload["phases"]["refine"]
+    # Routing block populated as for any tier.
+    assert payload["routing"]["idea"] == "rebuild the orchestrator from scratch"
+    assert payload["routing"]["final_tier"] == "full"
+    assert payload["routing"]["proposed_tier"] == "full"
+    assert payload["routing"]["rationale"] == "cross-cutting architectural change"
+    assert payload["routing"]["constitution_present"] is True
+    assert "decided_at" in payload["routing"]
+
+
+def test_seed_routed_feature_full_tier_phases_block_only_refine(tmp_path: Path) -> None:
+    """Full tier seed creates exactly one phase entry — refine — with no leaked spec key."""
+    repo = _stage_repo(tmp_path)
+
+    folder = seed_routed_feature(
+        repo,
+        idea="full tier phases shape",
+        final_tier="full",
+        today=TODAY,
+    )
+
+    payload = _read_state(folder)
+    assert set(payload["phases"].keys()) == {"refine"}
+
+
+def test_seed_routed_feature_full_tier_returns_path(tmp_path: Path) -> None:
+    """Full tier seed return value matches repo_root/.forge/features/<feature_id>."""
+    repo = _stage_repo(tmp_path)
+    idea = "full tier path return"
+    expected_slug = slug_from_idea(idea)
+
+    folder = seed_routed_feature(
+        repo,
+        idea=idea,
+        final_tier="full",
+        today=TODAY,
+    )
+
+    assert folder == repo / ".forge" / "features" / f"2026-05-08-{expected_slug}"
+
+
+def test_seed_routed_feature_full_tier_schema_validates(tmp_path: Path) -> None:
+    """Full tier seed produces a state.json that re-validates cleanly against the schema."""
+    repo = _stage_repo(tmp_path)
+
+    folder = seed_routed_feature(
+        repo,
+        idea="full tier schema check",
+        final_tier="full",
+        today=TODAY,
+    )
+
+    payload = _read_state(folder)
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    # Must not raise; the seed body + appended routing block both round-trip
+    # through the schema for full tier just as they do for focused/standard.
+    jsonschema.validate(instance=payload, schema=schema)
+
+
+def test_seed_routed_feature_full_tier_post_seed_cleanup_on_record_routing_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full-tier post-seed cleanup: record_routing_decision failure removes the seeded folder."""
+    repo = _stage_repo(tmp_path)
+
+    def _boom(*args: Any, **kwargs: Any) -> None:
+        raise StateError("simulated full-tier routing-block schema rejection")
+
+    monkeypatch.setattr(routing, "record_routing_decision", _boom)
+
+    with pytest.raises(StateError, match="simulated full-tier"):
         seed_routed_feature(
             repo,
-            idea="rebuild the orchestrator from scratch",
+            idea="will fail at routing block on full",
             final_tier="full",
             today=TODAY,
         )
 
-    assert "P6.2" in str(excinfo.value)
-    # No folder should exist anywhere under .forge/features/.
+    # T0.5 cleanup predicate accepts (refine, in_progress) — the orphan
+    # folder must be gone after re-raise.
     features_root = repo / ".forge" / "features"
-    if features_root.exists():
-        # Guard: if pytest fixtures or another test ever pre-create this dir,
-        # we still want to assert nothing was seeded by THIS call.
-        assert not any(features_root.iterdir()), "no folder may be seeded when --full raises"
+    assert not features_root.exists() or not any(features_root.iterdir())
+
+
+# ---------------------------------------------------------------------------
+# Bogus tier — refuses BEFORE any disk mutation
+# ---------------------------------------------------------------------------
 
 
 def test_seed_routed_feature_bogus_tier_raises_value_error(tmp_path: Path) -> None:

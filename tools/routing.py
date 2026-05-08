@@ -19,11 +19,14 @@ The function composes T0.5 + T2 + existing P5/P1 helpers:
     the seeded folder when ``record_routing_decision`` fails AFTER the
     folder was created on disk.
 
-``--full`` raises :class:`NotImplementedError` BEFORE any disk mutation.  The
-helper also rejects unknown tiers via :class:`ValueError` BEFORE any
-mutation, so neither slot can leave a partial folder behind.
+All three tiers seed normally: ``focused`` / ``standard`` enter at
+``current_phase="spec"`` (P6.1 default), and ``full`` enters at
+``current_phase="refine"`` (P6.2 — refine is full-tier-only per the locked
+constraint enforced by ``create_feature_folder``).  Unknown tiers refuse
+via :class:`ValueError` BEFORE any mutation, so the seed slot can never
+leave a partial folder behind.
 
-Coverage AC: 100% on this module (M3 P6.1 plan §AC #5).
+Coverage AC: 100% on this module (M3 P6.1 plan §AC #5; preserved by P6.2).
 """
 
 from __future__ import annotations
@@ -52,12 +55,6 @@ from tools.state import (
 # same shape as a slug derived from ``slug_from_idea``.
 _FEATURE_SLUG_RE: re.Pattern[str] = re.compile(r"^[a-z0-9][a-z0-9-]{2,}$")
 
-# Locked dispatch literal for the not-yet-shipped ``--full`` path.  The skill
-# (T3) surfaces the raise verbatim so an operator can grep the upcoming plan.
-_FULL_TIER_PLAN_POINTER: str = (
-    "--full routing ships in M3 P6.2; track at docs/plans/2026-05-DD-m3-p6-2-full-tier-routing.md"
-)
-
 
 def seed_routed_feature(
     repo_root: Path,
@@ -81,35 +78,41 @@ def seed_routed_feature(
 
     Order of operations:
 
-      1. ``final_tier == "full"`` → :class:`NotImplementedError` (P6.2 pointer).
-      2. ``final_tier not in VALID_TIERS`` → :class:`ValueError`.  At this
-         point only ``focused`` / ``standard`` survive; ``full`` was already
-         caught above.
+      1. ``final_tier not in VALID_TIERS`` → :class:`ValueError` BEFORE any
+         disk mutation.  All three tiers (``focused`` / ``standard`` /
+         ``full``) survive this gate.
+      2. Derive ``current_phase`` from ``final_tier``:
+         ``full`` → ``"refine"``; ``focused`` / ``standard`` → ``"spec"``.
+         The full-tier branch relies on ``create_feature_folder`` to enforce
+         the refine⇒full constraint (M3 P6.2 T1).
       3. Compute ``today_iso`` from ``today`` (or ``date.today()`` when
-         omitted) and ``feature_id = f"{today_iso}-{slug_from_idea(idea)}"``.
+         omitted) and ``feature_id = f"{today_iso}-{slug_from_idea(idea)}"``
+         (or ``feature_slug`` when given for suffix-disambig).
       4. Resolve ``schema_path = repo_root / "schemas/state.schema.json"``.
       5. Pre-collision check via :func:`feature_folder_exists` →
          :class:`ArchiveError` on True (no disk mutation yet).
-      6. Call :func:`create_feature_folder` (seed body validated against
-         schema BEFORE any disk write).
+      6. Call :func:`create_feature_folder` with ``current_phase`` (seed
+         body validated against schema BEFORE any disk write).
       7. Call :func:`record_routing_decision` against the new state.json.
          On ANY exception (schema refusal, OSError, KeyboardInterrupt,
          SystemExit), invoke :func:`cleanup_seeded_feature` BEFORE
          re-raising the original exception with traceback intact.  Cleanup
          is best-effort: if it itself raises, the original exception still
          re-raises (the cleanup failure is suppressed; ``cleanup_seeded_feature``
-         never raises on the supported orphan shape so this branch only hits
-         when the predicate has already shifted out from under us, in which
-         case the partial folder is the lesser of two evils).
+         never raises on the supported ``(spec|refine, in_progress)`` orphan
+         shapes so this branch only hits when the predicate has shifted out
+         from under us, in which case the partial folder is the lesser of
+         two evils).
 
     Args:
         repo_root: Repository root containing the ``.forge/`` tree.
         idea: User-supplied idea text.  Persisted verbatim into
             ``state.json.routing.idea`` — the skill prints a one-line
             secrets warning before invoking this helper.
-        final_tier: ``focused`` or ``standard`` for P6.1.  ``full`` raises
-            :class:`NotImplementedError` with a pointer to the planned
-            P6.2 plan.  Any other value raises :class:`ValueError`.
+        final_tier: ``focused``, ``standard``, or ``full``.  Full tier
+            seeds ``current_phase="refine"``; focused/standard seed
+            ``current_phase="spec"``.  Any other value raises
+            :class:`ValueError`.
         proposed_tier: Tier the LLM proposed before user override (optional).
         rationale: One-sentence reason from the router or user (optional).
         constitution_present: ``True`` when ``.forge/CONSTITUTION.md`` was
@@ -127,15 +130,15 @@ def seed_routed_feature(
             no-collision path).
 
     Returns:
-        Path to the new ``.forge/features/<feature_id>/`` folder, ready for
-        the skill to print ``Next: /forge:spec --feature <feature_id>``.
+        Path to the new ``.forge/features/<feature_id>/`` folder.  The
+        skill renders the dispatch literal based on tier:
+        focused/standard → ``Next: /forge:spec --feature <feature_id>``;
+        full → ``Next: /forge:refine --feature <feature_id>``.
 
     Raises:
-        NotImplementedError: ``final_tier == "full"`` (M3 P6.2 territory);
-            no folder created.
-        ValueError: ``final_tier`` is not in ``VALID_TIERS`` and is not
-            ``"full"``; OR ``feature_slug`` is given but does not satisfy
-            the slug pattern.  No folder created in either case.
+        ValueError: ``final_tier`` is not in ``VALID_TIERS``; OR
+            ``feature_slug`` is given but does not satisfy the slug
+            pattern.  No folder created in either case.
         ArchiveError: Folder already exists (collision), or
             :func:`create_feature_folder` itself rejects the seed.
         StateError: ``record_routing_decision`` rejected the routing
@@ -145,13 +148,17 @@ def seed_routed_feature(
             steps 6 and 7 also trigger the cleanup wrapper before
             re-raising.
     """
-    # Step 1: --full → NotImplementedError BEFORE any disk mutation.
-    if final_tier == "full":
-        raise NotImplementedError(_FULL_TIER_PLAN_POINTER)
-
-    # Step 2: any other unknown tier → ValueError BEFORE any disk mutation.
+    # Step 1: refuse unknown tiers BEFORE any disk mutation.  All three
+    # known tiers (focused/standard/full) survive this gate as of P6.2.
     if final_tier not in VALID_TIERS:
         raise ValueError(f"invalid final_tier {final_tier!r}; must be one of {VALID_TIERS}")
+
+    # Step 2: derive seed entry phase from tier.  Full tier enters at
+    # refine (Socratic loop owns the spec hand-off via complete_phase +
+    # start_phase later).  Focused/standard enter at spec directly.
+    # ``create_feature_folder`` enforces the refine⇒full constraint so a
+    # mis-paired (refine, focused) seed would refuse before any disk write.
+    current_phase = "refine" if final_tier == "full" else "spec"
 
     # Step 3: feature_id = <today>-<slug>.  ``today`` injection keeps tests
     # deterministic without monkeypatching ``datetime.date``.  When
@@ -190,6 +197,7 @@ def seed_routed_feature(
         repo_root,
         feature_id=feature_id,
         tier=final_tier,
+        current_phase=current_phase,
         schema_path=schema_path,
     )
 

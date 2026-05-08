@@ -20,6 +20,7 @@ Coverage target: AC #6, #7, #11 from the M3 P6.1 plan.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -370,27 +371,31 @@ def test_record_routing_decision_failure_leaves_no_orphan(
 
 
 # ---------------------------------------------------------------------------
-# 6. --full raises NotImplementedError; no folder left behind
+# 6. --full seeds normally with current_phase="refine" (P6.2 contract)
 # ---------------------------------------------------------------------------
 
 
-def test_full_tier_raises_not_implemented_no_folder_left_behind(tmp_path: Path) -> None:
-    """``final_tier='full'`` raises with a P6.2 pointer; nothing seeded on disk."""
+def test_full_tier_seeds_refine_phase_via_smoke(tmp_path: Path) -> None:
+    """``final_tier='full'`` seeds a folder with ``current_phase='refine'``.
+
+    P6.2 lifted the P6.1 ``NotImplementedError`` raise.  Full-tier seed now
+    enters at refine; the ``/forge:do --full`` skill renders
+    ``Next: /forge:refine --feature <feature_id>`` from this folder.
+    Dedicated full-tier walk smoke (T6) lives in a separate file.
+    """
     repo = _stage_repo(tmp_path)
 
-    with pytest.raises(NotImplementedError) as excinfo:
-        seed_routed_feature(
-            repo,
-            idea="rebuild orchestrator",
-            final_tier="full",
-            today=TODAY,
-        )
+    folder = seed_routed_feature(
+        repo,
+        idea="rebuild orchestrator",
+        final_tier="full",
+        today=TODAY,
+    )
 
-    assert "P6.2" in str(excinfo.value)
-
-    # The .forge/features/ tree must NOT exist (no disk mutation reached).
-    features_root = repo / ".forge" / "features"
-    assert not features_root.exists() or list(features_root.iterdir()) == []
+    payload = json.loads((folder / "state.json").read_text(encoding="utf-8"))
+    assert payload["tier"] == "full"
+    assert payload["current_phase"] == "refine"
+    assert payload["phases"]["refine"]["status"] == "in_progress"
 
 
 # ---------------------------------------------------------------------------

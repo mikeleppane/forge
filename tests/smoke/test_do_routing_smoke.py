@@ -190,18 +190,24 @@ def test_standard_walk_seed_to_plan(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_capability_collision_suffix_disambig_branch(tmp_path: Path) -> None:
-    """Pre-seeded canonical capability triggers the suffix-disambig flow.
+def test_capability_scan_does_not_block_seeder_no_canonical_guard(tmp_path: Path) -> None:
+    """The seeder does NOT consult ``scan_existing_capabilities``.
 
-    Mirrors the documented ``/forge:do`` step-4 contract: callers run
-    :func:`scan_existing_capabilities` BEFORE seeding; on a clash the user
-    supplies a disambiguating slug suffix (``<slug>-v2``) and the helper
-    is re-invoked with the disambiguated idea text.
+    The documented division of labour for ``/forge:do`` step 4 puts the
+    canonical-capability check at the SKILL layer (prose-driven, runs
+    before the seeder).  The seeder itself only collides on a feature
+    folder under ``.forge/features/<feature_id>``, not on a canonical
+    capability under ``.forge/specs/<slug>/``.
 
-    The helper itself does not call ``scan_existing_capabilities``; the
-    skill (T3 prose) does.  This test asserts the two play nicely together:
-    the scan surfaces the existing slug, and a different idea text yields
-    a different slug that seeds successfully.
+    This test pins that separation: pre-seed a canonical capability, then
+    confirm seed_routed_feature happily runs (no guard rejection).  The
+    second invocation collides because the FEATURE folder now exists, not
+    because the canonical capability is in the way.
+
+    Renamed from ``test_capability_collision_suffix_disambig_branch``
+    (M3 P6.1 T7 finding p6-1-L7) — the old name overstated coverage; the
+    real suffix-disambig flow is locked by
+    ``test_suffix_disambig_yields_distinct_slug``.
     """
     repo = _stage_repo(tmp_path)
 
@@ -242,19 +248,48 @@ def test_capability_collision_suffix_disambig_branch(tmp_path: Path) -> None:
         )
     assert canonical_slug in str(excinfo.value)
 
-    # Disambiguated idea text yields a different slug → success.
-    disambig_idea = f"{idea} v2"
-    disambig_slug = slug_from_idea(disambig_idea)
-    assert disambig_slug != canonical_slug
 
-    folder_second = seed_routed_feature(
+def test_suffix_disambig_yields_distinct_slug(tmp_path: Path) -> None:
+    """Two ideas that differ only by a disambiguating suffix produce two
+    distinct feature folders, both seeded successfully.
+
+    Locks the real suffix-disambig flow that the previous (now-renamed)
+    test claimed to cover but actually didn't.  Drives two
+    ``seed_routed_feature`` calls back-to-back with idea variants that
+    slug-derive to different folders.
+
+    M3 P6.1 T7 finding p6-1-L7.
+    """
+    repo = _stage_repo(tmp_path)
+    idea_a = "add OAuth login flow"
+    idea_b = "add OAuth login flow v2"
+
+    slug_a = slug_from_idea(idea_a)
+    slug_b = slug_from_idea(idea_b)
+    assert slug_a != slug_b, (
+        f"fixtures must produce distinct slugs to exercise suffix-disambig: "
+        f"got {slug_a!r} == {slug_b!r}"
+    )
+
+    folder_a = seed_routed_feature(
         repo,
-        idea=disambig_idea,
+        idea=idea_a,
         final_tier="focused",
         today=TODAY,
     )
-    assert folder_second.is_dir()
-    assert folder_second.name == f"2026-05-08-{disambig_slug}"
+    folder_b = seed_routed_feature(
+        repo,
+        idea=idea_b,
+        final_tier="focused",
+        today=TODAY,
+    )
+
+    # Both seeds succeeded and produced distinct feature folders.
+    assert folder_a.is_dir()
+    assert folder_b.is_dir()
+    assert folder_a != folder_b
+    assert folder_a.name == f"2026-05-08-{slug_a}"
+    assert folder_b.name == f"2026-05-08-{slug_b}"
 
 
 # ---------------------------------------------------------------------------

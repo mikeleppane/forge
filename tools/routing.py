@@ -28,7 +28,7 @@ Coverage AC: 100% on this module (M3 P6.1 plan §AC #5).
 
 from __future__ import annotations
 
-import contextlib
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -165,6 +165,17 @@ def seed_routed_feature(
     # so the cleanup wrapper is scoped tightly to it.  ``BaseException``
     # catches KeyboardInterrupt + SystemExit alongside the normal raise
     # path (StateError on schema refusal, OSError on disk-full mid-write).
+    #
+    # Cleanup-failure semantics: we MUST surface the original
+    # ``record_routing_decision`` exception to the caller — it carries the
+    # actionable failure mode (schema refusal, disk-full, KeyboardInterrupt).
+    # If ``cleanup_seeded_feature`` itself raises during rollback (a
+    # ``BaseException`` such as ``KeyboardInterrupt`` mid-rmtree, or an OSError
+    # surfacing through a path the helper doesn't normally trap), we log a
+    # one-line WARN and re-raise the ORIGINAL exception via ``raise original``.
+    # We catch ``BaseException`` from cleanup — not just ``Exception`` — so a
+    # ``KeyboardInterrupt`` during rmtree can never mask the underlying
+    # ``record_routing_decision`` failure.  Addresses M3 P6.1 T7 finding p6-1-M3.
     state_path = folder / "state.json"
     try:
         record_routing_decision(
@@ -176,15 +187,17 @@ def seed_routed_feature(
             constitution_present=constitution_present,
             schema_path=schema_path,
         )
-    except BaseException:
-        # Best-effort: if cleanup itself raises (e.g. predicate has shifted
-        # because some other process touched the folder), suppress it so
-        # the ORIGINAL exception re-raises with traceback intact.  We do
-        # NOT chain the cleanup exception via ``from`` — the caller cares
-        # about the underlying record_routing_decision failure, not the
-        # rmtree hiccup.
-        with contextlib.suppress(Exception):
+    except BaseException as original:
+        try:
             cleanup_seeded_feature(repo_root, feature_id)
-        raise
+        except BaseException:
+            # Cleanup itself raised. Log and fall through to re-raise the
+            # ORIGINAL record_routing_decision exception, NOT the cleanup one.
+            print(
+                "WARN: cleanup_seeded_feature raised during post-seed rollback; "
+                "original exception below",
+                file=sys.stderr,
+            )
+        raise original from None
 
     return folder

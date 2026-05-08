@@ -289,6 +289,45 @@ def test_seed_routed_feature_cleanup_failure_suppressed_original_reraises(
         )
 
 
+def test_cleanup_failure_with_baseexception_preserves_original(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """If cleanup raises a BaseException (e.g. KeyboardInterrupt mid-rmtree),
+    the ORIGINAL ``record_routing_decision`` exception must still propagate
+    and a one-line WARN must hit stderr.
+
+    Locks remediation for M3 P6.1 T7 finding p6-1-M3 — without the explicit
+    BaseException catch around cleanup, a KeyboardInterrupt during rmtree
+    would mask the underlying StateError.
+    """
+    repo = _stage_repo(tmp_path)
+
+    def _boom(*args: Any, **kwargs: Any) -> None:
+        raise StateError("original routing failure")
+
+    def _cleanup_kbd_interrupt(*args: Any, **kwargs: Any) -> bool:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(routing, "record_routing_decision", _boom)
+    monkeypatch.setattr(routing, "cleanup_seeded_feature", _cleanup_kbd_interrupt)
+
+    with pytest.raises(StateError, match="original routing failure"):
+        seed_routed_feature(
+            repo,
+            idea="kbd interrupt during cleanup",
+            final_tier="focused",
+            today=TODAY,
+        )
+
+    captured = capsys.readouterr()
+    assert "cleanup_seeded_feature raised during post-seed rollback" in captured.err, (
+        "stderr must carry the WARN line so operators can correlate the "
+        "rollback failure with the original record_routing_decision exception"
+    )
+
+
 # ---------------------------------------------------------------------------
 # today injection determinism + schema_path wiring + final routing block shape
 # ---------------------------------------------------------------------------

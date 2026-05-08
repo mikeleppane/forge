@@ -12,13 +12,23 @@ Run the FORGE spec phase. Either:
 - **Refine existing:** `/forge:spec --feature <id>`
   Re-enters the spec phase for an existing feature; calls `tools.state.start_phase(path, "spec")` to reset that phase, then invokes the skill against the existing SPEC.md.
 
+## Capability scan (runs first, all tiers)
+
+The skill runs a capability scan first: it computes a slug from the idea text
+via `tools.archive.slug_from_idea` and checks `.forge/specs/` for an existing
+canonical capability via `tools.archive.scan_existing_capabilities`. If a match
+is found, the skill offers to route to `/forge:change` for a delta proposal
+instead of creating a new feature folder. If no match, it proceeds with the
+standard SPEC.md authoring lifecycle.
+
 ## Behavior
 
 1. Parse args. If neither idea text nor `--feature <id>` is provided, error: `usage: /forge:spec "<idea>" | /forge:spec --feature <id>`.
-2. For new feature: derive id, then call `tools.state.feature_folder_exists(repo_root, feature_id)`. If True, abort with a slug-suffix suggestion. Otherwise create folder, copy `templates/feature/SPEC.md`, `templates/feature/decisions.md`, and `templates/feature/state.json` into it; set `feature_id`, `tier` (default `focused` unless user passes `--standard` or `--full`), `current_phase = "spec"`.
-3. For existing feature: read `.forge/features/<id>/state.json`, call `tools.state.start_phase(path, "spec")`.
-4. Invoke the `forge-spec` skill (see `skills/forge-spec/SKILL.md`).
-5. On completion, print: feature id, path to SPEC.md, next recommended step (`/forge:execute` for `--focused`).
+2. **Capability scan (all tiers, before feature folder creation):** call `tools.archive.slug_from_idea(idea_text)` and `tools.archive.scan_existing_capabilities(repo_root)`. If the slug already exists in `.forge/specs/`, prompt the user to route to `/forge:change` instead. On `y`, dispatch `/forge:change --capability <slug>` and exit — do NOT create `.forge/features/<id>/`. On `n`, continue with a user-provided slug suffix.
+3. For new feature: derive id, then call `tools.state.feature_folder_exists(repo_root, feature_id)`. If True, abort with a slug-suffix suggestion. Otherwise create folder, copy `templates/feature/SPEC.md`, `templates/feature/decisions.md`, and `templates/feature/state.json` into it; set `feature_id`, `tier` (default `focused` unless user passes `--standard` or `--full`), `current_phase = "spec"`.
+4. For existing feature: read `.forge/features/<id>/state.json`, call `tools.state.start_phase(path, "spec")`.
+5. Invoke the `forge-spec` skill (see `skills/forge-spec/SKILL.md`).
+6. On completion, print: feature id, path to SPEC.md, next recommended step (`/forge:execute` for `--focused`).
 
 ## Failure modes
 

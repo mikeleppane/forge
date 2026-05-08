@@ -1,0 +1,6 @@
+# Decisions
+
+## 2026-05-08 — M3 P5 scope ADR
+**Context:** Starting M3 P5 — `/forge:change` delta proposals + capability scan + transactional delta merge per spec §5.3.5 + §11 D-6/D-7/D-2a. Plan: `docs/plans/2026-05-08-m3-p5-change-deltas.md`. Baseline: 524 tests on `feat/m3-p5-change-deltas` branched from `main` at `b40231f`.
+**Change:** Add four public functions to `tools/archive.py` (`slug_from_idea`, `scan_existing_capabilities`, `cleanup_orphan_feature`, `merge_delta_proposal`) + `_mark_change_merged_hook` factory; new `tools/delta_merge.py`; new `validate_capability_spec_sections` in `tools/validate/spec_structural.py`; align `tools/validate/health.py` orphan predicate with `cleanup_orphan_feature` via shared `_ORPHAN_FEATURE_FILES`; new `forge-change` skill + `/forge:change` command; capability-scan reorder in `forge-spec` (first step, all tiers); `--change <id>` mode in `forge-ship`. Existing `ship_feature` contract is untouched.
+**Alternatives considered:** Subprocess shell-out to validators (rejected per direct-import precedent in `tools/constitution_amend.py:_validate_constitution_body`); tier-gating capability scan (rejected — spec §5.3.5 does not gate; reviewer-2 finding); single-file `merge_delta_proposal` without separate `delta_merge.py` module (rejected — pure parse/apply is testable in isolation, fits P3-style three-module split).

@@ -20,3 +20,15 @@ TEMPLATED_FEATURE_FILES: frozenset[str] = frozenset(
         "decisions.md",
     }
 )
+
+# Files that may appear in a never-advanced orphan feature folder.
+# Used by both cleanup_orphan_feature (tools/archive.py) and the health
+# orphan-detection check (tools/validate/health.py) so the two predicates stay
+# in sync (Reviewer-2 finding, M3 P5 T3).
+_ORPHAN_FEATURE_FILES: frozenset[str] = frozenset(
+    {
+        "state.json",
+        "SPEC.md",
+        "decisions.md",
+    }
+)

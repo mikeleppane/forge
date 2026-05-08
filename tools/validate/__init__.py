@@ -22,6 +22,7 @@ from .health import validate_health
 from .plan import validate_plan_tasks, validate_verified_deps
 from .spec_semantic import validate_anchors, validate_scenarios
 from .spec_structural import (
+    validate_capability_spec_sections,
     validate_capability_uniqueness,
     validate_frontmatter,
     validate_negative_requirements,
@@ -35,6 +36,7 @@ __all__ = [
     "ValidationError",
     "main",
     "validate_anchors",
+    "validate_capability_spec_sections",
     "validate_capability_uniqueness",
     "validate_constitution",
     "validate_delta",

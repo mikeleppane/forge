@@ -19,6 +19,7 @@ REQUIRED_ALL: frozenset[str] = frozenset(
         "ValidationError",
         "main",
         "validate_anchors",
+        "validate_capability_spec_sections",
         "validate_capability_uniqueness",
         "validate_constitution",
         "validate_delta",
@@ -34,6 +35,7 @@ REQUIRED_ALL: frozenset[str] = frozenset(
 
 # Pinned signatures (keyword-only / positional names). Captured pre-split.
 EXPECTED_SIGNATURES: dict[str, tuple[str, ...]] = {
+    "validate_capability_spec_sections": ("path",),
     "validate_constitution": ("path",),
     "validate_delta": ("path",),
     "validate_negative_requirements": ("path",),

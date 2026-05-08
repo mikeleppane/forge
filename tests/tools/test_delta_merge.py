@@ -628,3 +628,48 @@ def test_delta_section_missing_triggers_error() -> None:
     text = "## Affects\n\nsections [Scenarios]\n\n## Rationale\n\nsome text\n"
     with pytest.raises(DeltaMergeError, match="missing ## Delta"):
         parse_proposal_body(text)
+
+
+# ---------------------------------------------------------------------------
+# H1 — Fence-awareness in section + anchor extraction
+# ---------------------------------------------------------------------------
+
+
+def test_extract_section_ignores_fenced_h2_collision() -> None:
+    """A fenced ## Scenarios block in the canonical body must NOT shadow
+    the real ## Scenarios section.
+
+    Without fence-awareness, REMOVE/MODIFY anchors in the real section
+    silently target the fenced example and can wipe the real heading.
+    """
+    canonical = (
+        "## Intent\n"
+        "intent body\n"
+        "\n"
+        "```\n"
+        "## Scenarios\n"
+        "fake content inside the fence\n"
+        "```\n"
+        "\n"
+        "## Scenarios\n"
+        "scenario-1: works\n"
+        "scenario-2: also works\n"
+        "\n"
+        "## Acceptance Criteria\n"
+        "- criterion-1: ok\n"
+    )
+    op = DeltaOp(
+        kind="REMOVE",
+        section="Scenarios",
+        anchor="scenario-1",
+        old_text=None,
+        new_text="",
+    )
+    result = apply_delta_ops(canonical, [op])
+    # The real section's scenario-1 line is gone; scenario-2 remains;
+    # the fenced example is untouched; ## Scenarios real heading remains.
+    assert "scenario-1" not in result
+    assert "scenario-2: also works" in result
+    assert "## Scenarios" in result  # real heading not corrupted
+    assert "fake content inside the fence" in result
+    assert "## Acceptance Criteria" in result

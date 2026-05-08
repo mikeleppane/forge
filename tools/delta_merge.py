@@ -409,8 +409,39 @@ def parse_proposal_body(text: str) -> list[DeltaOp]:
     return _build_ops_from_delta(delta_body, declared_sections)
 
 
+def _mask_fenced_lines(lines: list[str]) -> list[str]:
+    r"""Return a copy of *lines* with fenced-block contents replaced by blank lines.
+
+    Lines that open or close a fence (````` ``` `````) are themselves blanked out.
+    This preserves list length and all line indices so callers can safely match
+    against the masked copy while using the original indices for slicing.
+
+    Args:
+        lines: All lines of the document (or a section thereof).
+
+    Returns:
+        A new list of the same length; lines inside (and including) fence
+        markers are replaced with ``"\n"``; lines outside fences are unchanged.
+    """
+    masked: list[str] = []
+    inside_fence = False
+    for line in lines:
+        if _FENCE_RE.match(line):
+            inside_fence = not inside_fence
+            masked.append("\n")  # blank out the fence marker line itself
+        elif inside_fence:
+            masked.append("\n")  # blank out content inside the fence
+        else:
+            masked.append(line)
+    return masked
+
+
 def _extract_section_bounds(lines: list[str], section_name: str) -> tuple[int, int]:
     """Find the start and end line indices of a named H2 section.
+
+    Fence-aware: H2 headers that appear inside a fenced code block are
+    ignored so that illustrative ``## <Name>`` examples in the canonical body
+    cannot shadow the real section heading.
 
     Args:
         lines: All lines of the canonical body.
@@ -425,11 +456,12 @@ def _extract_section_bounds(lines: list[str], section_name: str) -> tuple[int, i
         DeltaMergeError: When *section_name* is not found.
     """
     heading = f"## {section_name}"
-    for idx, line in enumerate(lines):
+    masked = _mask_fenced_lines(lines)
+    for idx, line in enumerate(masked):
         if line.rstrip() == heading:
             content_start = idx + 1
-            for j in range(content_start, len(lines)):
-                if lines[j].startswith("## ") and lines[j].rstrip() != heading:
+            for j in range(content_start, len(masked)):
+                if masked[j].startswith("## ") and masked[j].rstrip() != heading:
                     return content_start, j
             return content_start, len(lines)
     raise DeltaMergeError(f"section not found in canonical body: {section_name!r}")

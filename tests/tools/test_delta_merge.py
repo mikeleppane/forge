@@ -673,3 +673,37 @@ def test_extract_section_ignores_fenced_h2_collision() -> None:
     assert "## Scenarios" in result  # real heading not corrupted
     assert "fake content inside the fence" in result
     assert "## Acceptance Criteria" in result
+
+
+# ---------------------------------------------------------------------------
+# M2 — Reject empty MODIFY 'was' guard
+# ---------------------------------------------------------------------------
+
+
+def test_modify_form_rejects_empty_was_guard() -> None:
+    """`was "", now "X"` is not a meaningful guard and must be rejected by the parser."""
+    body = (
+        "## Affects\n"
+        "- spec: foo — sections [Scenarios]\n"
+        "## Delta\n"
+        '~ MODIFY: scenario-1 — was "", now "new value"\n'
+    )
+    with pytest.raises(DeltaMergeError, match="MODIFY"):
+        parse_proposal_body(body)
+
+
+def test_apply_modify_rejects_empty_old_text_directly() -> None:
+    """Direct DeltaOp construction with empty old_text must also raise.
+
+    Defense in depth — even if a caller bypasses parse_proposal_body,
+    apply_delta_ops should reject an empty MODIFY guard."""
+    op = DeltaOp(
+        kind="MODIFY",
+        section="Scenarios",
+        anchor="scenario-1",
+        old_text="",
+        new_text="anything",
+    )
+    canonical = "## Scenarios\nscenario-1: works\n"
+    with pytest.raises(DeltaMergeError, match="empty"):
+        apply_delta_ops(canonical, [op])

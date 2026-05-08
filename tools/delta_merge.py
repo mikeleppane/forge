@@ -80,8 +80,10 @@ _INDENTED_RE = re.compile(r"^\s+")
 
 # Extracts was/now from MODIFY header: was "old", now "new"
 # The anchor is everything before " — was " (or " was " without em-dash).
+# old-text capture uses [^"]+ (non-empty) — an empty was "" guard is not
+# meaningful and is rejected at parse time.
 _MODIFY_FORM_RE = re.compile(
-    r'^(?P<anchor>.*?)\s*(?:—|-{1,2})\s*was\s+"(?P<old>[^"]*)"\s*,\s*now\s+"(?P<new>[^"]*)"',
+    r'^(?P<anchor>.*?)\s*(?:—|-{1,2})\s*was\s+"(?P<old>[^"]+)"\s*,\s*now\s+"(?P<new>[^"]*)"',
 )
 
 # Extracts an optional [Section] prefix from an op's rest-of-header text.
@@ -699,6 +701,8 @@ def _apply_modify(
 
     # Guard check
     if op.old_text is not None:
+        if not op.old_text.strip():
+            raise DeltaMergeError(f"MODIFY 'was' guard cannot be empty for anchor {op.anchor!r}")
         matched_first_line = section_lines[start].rstrip("\n")
         norm_line = _normalize_anchor(matched_first_line)
         norm_guard = _normalize_anchor(op.old_text)

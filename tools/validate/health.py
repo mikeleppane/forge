@@ -8,7 +8,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from ._feature_layout import TEMPLATED_FEATURE_FILES
+from ._feature_layout import _ORPHAN_FEATURE_FILES
 from ._finding import Finding
 from ._frontmatter import (
     _build_validator,
@@ -89,7 +89,7 @@ def _check_feature_payload(
 
     commits = payload.get("commits") or []
     refine_block = phases.get("refine") if isinstance(phases, dict) else None
-    extra_files = [p for p in entry.iterdir() if p.name not in TEMPLATED_FEATURE_FILES]
+    extra_files = [p for p in entry.iterdir() if p.name not in _ORPHAN_FEATURE_FILES]
     if (
         current_phase == "refine"
         and isinstance(refine_block, dict)

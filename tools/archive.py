@@ -6,11 +6,14 @@ owns the path math so the LLM cannot misplace shipped artifacts.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
+
+from tools.validate._feature_layout import _ORPHAN_FEATURE_FILES
 
 _CAPABILITY_RE = re.compile(r"^[a-z0-9-]+$")
 # Schema-aligned slug: must start with alnum, at least 3 chars total.
@@ -134,6 +137,111 @@ def scan_existing_capabilities(repo_root: Path) -> list[str]:
     if not specs_dir.is_dir():
         return []
     return sorted(d.name for d in specs_dir.iterdir() if d.is_dir() and (d / "SPEC.md").is_file())
+
+
+def _orphan_conditions_met(folder: Path) -> bool:  # noqa: PLR0911
+    """Return True when the folder satisfies all three D-2a orphan conditions.
+
+    Conditions (all must hold):
+      1. state.json.current_phase == "refine" AND phases.refine.status == "in_progress".
+      2. state.json.commits == [].
+      3. Folder contents are a strict subset of _ORPHAN_FEATURE_FILES.
+
+    Does NOT raise on I/O failures — returns False so callers treat a broken
+    state.json as a non-orphan (safe default). The defensive predicate is
+    intentionally a flat sequence of independent guards (PLR0911 silenced):
+    each early-return marks a distinct precondition that must hold, and
+    flattening to one final boolean would obscure which condition failed.
+    """
+    state_path = folder / "state.json"
+    if not state_path.is_file():
+        return False
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+
+    # Condition 1: phase + status
+    if payload.get("current_phase") != "refine":
+        return False
+    phases = payload.get("phases")
+    if not isinstance(phases, dict):
+        return False
+    refine_block = phases.get("refine")
+    if not isinstance(refine_block, dict) or refine_block.get("status") != "in_progress":
+        return False
+
+    # Condition 2: no commits
+    commits = payload.get("commits") or []
+    if commits:
+        return False
+
+    # Condition 3: folder contents are a strict subset of _ORPHAN_FEATURE_FILES
+    try:
+        present = {p.name for p in folder.iterdir()}
+    except OSError:
+        return False
+    return present.issubset(_ORPHAN_FEATURE_FILES)
+
+
+def cleanup_orphan_feature(repo_root: Path, feature_id: str) -> bool:
+    """Remove an orphan feature folder that has never advanced past the initial seed.
+
+    Validates ``feature_id`` slug, checks the three D-2a conditions via a shared
+    helper, re-checks them immediately before ``shutil.rmtree`` (race-narrowing),
+    then removes the folder.  All condition failures are logged to stderr and
+    return ``False``; only invalid ``feature_id`` raises ``ArchiveError``.
+
+    D-2a conditions (all three must hold):
+      1. ``state.json.current_phase == "refine"`` AND
+         ``phases.refine.status == "in_progress"``.
+      2. ``state.json.commits == []``.
+      3. Folder contents are a strict subset of
+         ``_ORPHAN_FEATURE_FILES = {"state.json", "SPEC.md", "decisions.md"}``.
+
+    Args:
+        repo_root: Repository root containing the ``.forge/`` tree.
+        feature_id: Feature folder name in YYYY-MM-DD-slug form.
+
+    Returns:
+        ``True`` on successful removal; ``False`` on any condition violation.
+
+    Raises:
+        ArchiveError: ``feature_id`` slug is malformed.
+        Any unexpected I/O exception (``PermissionError``, disk error) propagates.
+    """
+    _validate_feature_id(feature_id)
+
+    folder = repo_root / ".forge" / "features" / feature_id
+    if not folder.is_dir():
+        print(
+            f"WARN: cleanup_orphan_feature: {feature_id!r} is not a directory — skipping",
+            file=sys.stderr,
+        )
+        return False
+
+    # Preflight check.
+    if not _orphan_conditions_met(folder):
+        print(
+            f"WARN: cleanup_orphan_feature: {feature_id!r} does not meet orphan conditions "
+            f"(preflight) — skipping",
+            file=sys.stderr,
+        )
+        return False
+
+    # Race-narrowing re-check immediately before rmtree.
+    if not _orphan_conditions_met(folder):
+        print(
+            f"WARN: cleanup_orphan_feature: {feature_id!r} conditions changed before rmtree "
+            f"— aborting to avoid data loss",
+            file=sys.stderr,
+        )
+        return False
+
+    shutil.rmtree(folder)
+    return True
 
 
 def _validate_capability(capability: str) -> None:

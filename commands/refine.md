@@ -19,18 +19,29 @@ a Socratic loop capped at 5 rounds. Writes the result to
   Optional; when omitted, the single-active rule resolves the unique
   unshipped feature.
 - `[<idea>]` — optional positional. CLI fallback for the idea text when
-  `state.json.routing.idea` is absent. Until `/forge:do --full` ships in
-  M3 P6.2, this is the documented direct-invocation path.
+  `state.json.routing.idea` is absent. Used on the direct-invocation
+  fallback path; the canonical entry is `/forge:do --full`.
 
 ## Behavior
 
 1. Resolves the active feature; guards `current_phase == "refine"`.
-2. Resolves the idea source. Precedence: `state.json.routing.idea` (when
-   seeded by `/forge:do --full`) wins and the CLI `<idea>` is ignored. When
-   `routing.idea` is absent AND the user passed CLI `<idea>`, seeds the
-   routing block via `tools.state.record_routing_decision` with
-   `final_tier="full"` before round 1. When both are absent, aborts with
-   `"/forge:refine needs an idea — pass one as an argument: /forge:refine \"<idea text>\""`.
+2. Resolves the idea source via the four-conjunct pre-seed predicate (see
+   `skills/forge-refine/SKILL.md` "Mode resolution"):
+   - **Pre-seed branch** — entry from `/forge:do --full` (all four
+     conjuncts hold: `--feature <id>` resolved, `state.json` parses,
+     `routing` block present, `current_phase == "refine"` AND
+     `phases.refine.status == "in_progress"`). The Socratic loop seeds
+     directly from `state.json.routing.idea`. Does NOT re-call
+     `record_routing_decision` — the routing block is already populated
+     by `/forge:do --full`, and re-calling would clobber the seed
+     `decided_at` timestamp.
+   - **Direct-invocation fallback** — any conjunct fails (existing M3 P4
+     behavior preserved). Precedence: `state.json.routing.idea` wins when
+     present and the CLI `<idea>` is ignored; when `routing.idea` is
+     absent AND the user passed CLI `<idea>`, seeds the routing block via
+     `tools.state.record_routing_decision` with `final_tier="full"`
+     before round 1. When both are absent, aborts with
+     `"/forge:refine needs an idea — pass one as an argument: /forge:refine \"<idea text>\""`.
 3. Runs a Socratic loop, max 5 rounds, calling
    `tools.state.increment_refine_attempts` after each user reply.
 4. Persists the converged paragraph via `tools.state.record_refined_idea`; on
@@ -38,13 +49,6 @@ a Socratic loop capped at 5 rounds. Writes the result to
    `state.json.deviations`.
 5. Transitions phase to `spec` via `complete_phase` + `start_phase`, then
    prints `next: /forge:spec`.
-
-## Bootstrap caveat (until M3 P6.2)
-
-`/forge:refine` does NOT create the feature folder — that's `/forge:spec`'s
-job. Until `/forge:do --full` ships in P6.2, the feature folder +
-`state.json` at `current_phase == "refine"` must already exist before
-`/forge:refine` can run.
 
 ## See also
 

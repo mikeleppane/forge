@@ -19,9 +19,10 @@ directly against an active feature whose `current_phase` is already `refine`.
   the only feature whose `state.json.current_phase != "done"`; abort if zero
   or multiple match.
 - `[<idea>]` — optional positional. CLI fallback for the idea text when
-  `state.json.routing.idea` is absent. Until `/forge:do --full` ships
-  (deferred to M3 P6.2), this is the documented direct-invocation path:
-  `/forge:refine [--feature <id>] "<idea text>"`.
+  `state.json.routing.idea` is absent. Used on the direct-invocation path
+  `/forge:refine [--feature <id>] "<idea text>"` (still supported for
+  re-running refine on an existing feature; the canonical entry is
+  `/forge:do --full`).
 - Idea source precedence: when `state.json.routing.idea` is present (seeded
   by `/forge:do --full`), use it and **ignore** any CLI `<idea>` (do not
   overwrite — routing is the canonical record). When absent AND CLI `<idea>`
@@ -31,12 +32,68 @@ directly against an active feature whose `current_phase` is already `refine`.
   `routing.refine_attempts` has a parent block to live under. When **both**
   are absent, abort with: `"/forge:refine needs an idea — pass one as an
   argument: /forge:refine \"<idea text>\""`.
-- Bootstrap caveat (until M3 P6.2 ships `/forge:do --full`): the feature
-  folder + `state.json` at `current_phase == "refine"` must already exist.
-  `/forge:refine` does NOT create the feature folder — that's `/forge:spec`'s
-  job. To bootstrap manually, ask the user to first create the folder via
-  the `/forge:spec` template path then flip `current_phase` to `refine`, or
-  wait for P6.2.
+
+## Adaptive routing entry
+
+`/forge:do --full` is the canonical entry path: it seeds the feature folder,
+writes the `routing` block to `state.json`, and advances `current_phase` to
+`refine` with `phases.refine.status == "in_progress"` before printing the
+dispatch literal `Next: /forge:refine --feature <feature_id>`. Direct
+invocation (`/forge:refine --feature <id> "<idea>"`) is still supported for
+re-running refine on an existing feature whose `current_phase` is already
+`refine`; the direct-invocation fallback path below covers that case.
+
+## Mode resolution
+
+Two entry paths converge on this skill: the **`/forge:do --full` pre-seed**
+branch (M3 P6.2+, the routing entry-point seeded the feature folder +
+`state.json.routing` block + advanced `current_phase` to `refine` before
+dispatching here) and the **direct-invocation fallback** (M3 P4 path —
+`/forge:refine --feature <id> "<idea>"` invoked standalone against an
+existing feature folder, no upstream `/forge:do` seed).
+
+**Pre-seed predicate (locked, four-conjunct AND).** The pre-seed branch
+fires only when **all four** of the following hold; otherwise the
+direct-invocation fallback path runs:
+
+1. `--feature <id>` resolved (the user invoked `/forge:refine --feature <id>`
+   — typically because `/forge:do --full` printed
+   `Next: /forge:refine --feature <feature_id>`).
+2. `state.json` parses successfully — i.e., the file exists and `state.json parses` cleanly as valid JSON.
+3. `state.json.routing` block is present (`idea`, `final_tier`, `decided_at`
+   all populated by `/forge:do --full` via
+   `tools.state.record_routing_decision`).
+4. `state.json.current_phase == "refine"` AND
+   `state.json.phases.refine.status == "in_progress"`. Both must hold;
+   either failing routes to the direct-invocation fallback. (The single
+   conjunct combining both phase fields is treated as one conjunct of the
+   four.)
+
+All four conjuncts must hold for the pre-seed branch to fire. If any
+conjunct fails — including the routing block being absent — the
+**direct-invocation fallback** branch runs as today (M3 P4 behavior:
+seed the routing block from CLI `<idea>` if `routing.idea` is absent;
+abort if both are absent).
+
+**Pre-seed branch behavior.** When the predicate holds, `/forge:refine`
+ENTERS the Socratic loop directly using `state.json.routing.idea` as the
+seed text. It does **NOT** call `tools.state.record_routing_decision` —
+the routing block is already populated by `/forge:do --full`, and
+re-calling `record_routing_decision` here would clobber the seed
+`decided_at` timestamp (the same clobber-prevention rationale as the
+forge-spec pre-seed `start_phase` guard). The phase guard via
+`tools.state.increment_refine_attempts` still runs on every round — both
+pre-seed and direct-invocation paths must satisfy `current_phase ==
+"refine"` before each round increments.
+
+**Direct-invocation fallback behavior.** When ANY conjunct fails (e.g.,
+`routing` block absent because the user invoked `/forge:refine`
+standalone), retain existing M3 P4 behavior: seed the routing block via
+`record_routing_decision(path, idea=<idea>, final_tier="full",
+proposed_tier="full", rationale="direct /forge:refine invocation")` from
+the CLI `<idea>` if `routing.idea` is absent; if both `routing.idea` AND
+CLI `<idea>` were absent, abort with the same error message documented
+under "Inputs" above.
 
 ## Steps
 
@@ -55,16 +112,23 @@ directly against an active feature whose `current_phase` is already `refine`.
    `"refine phase is full-tier only; current tier is '<X>'"`. Do not invent
    a custom abort string here either; quote the helper. Refine is full-tier
    only — focused and standard tiers do not enter this phase.
-4. **Resolve idea source.** Pull `state.json.routing.idea`. If present, use it
-   and ignore any CLI `<idea>` argument (routing is the canonical record;
-   do not overwrite). If `routing.idea` is absent AND a CLI `<idea>` was
-   passed, seed the routing block first via
-   `tools.state.record_routing_decision(path, idea=<idea>, final_tier="full",
-   proposed_tier="full", rationale="direct /forge:refine invocation")` —
-   this satisfies the schema requirement that `routing` carry `idea`,
-   `final_tier`, and `decided_at`, and gives `increment_refine_attempts` a
-   block to mutate. If **both** are absent, abort with:
-   `"/forge:refine needs an idea — pass one as an argument: /forge:refine \"<idea text>\""`.
+4. **Resolve idea source.** Branch on the pre-seed predicate (see "Mode
+   resolution" above):
+   - **Pre-seed branch** (all four conjuncts hold): `routing.idea` is
+     already present in `state.json` (seeded by `/forge:do --full`). Use
+     it as the seed text and ignore any CLI `<idea>` argument — routing
+     is the canonical record. Do **NOT** call `record_routing_decision`
+     again; doing so would clobber the seed `decided_at` timestamp.
+   - **Direct-invocation fallback** (any conjunct fails): existing M3 P4
+     behavior. If `routing.idea` is present, use it and ignore any CLI
+     `<idea>`. If `routing.idea` is absent AND a CLI `<idea>` was passed,
+     seed the routing block first via
+     `tools.state.record_routing_decision(path, idea=<idea>, final_tier="full",
+     proposed_tier="full", rationale="direct /forge:refine invocation")` —
+     this satisfies the schema requirement that `routing` carry `idea`,
+     `final_tier`, and `decided_at`, and gives `increment_refine_attempts`
+     a block to mutate. If **both** are absent, abort with:
+     `"/forge:refine needs an idea — pass one as an argument: /forge:refine \"<idea text>\""`.
 5. **Detect ambiguity.** Scan the idea for vague verbs ("improve", "better",
    "fix"), compound goals (multiple "and"-joined outcomes), and missing
    acceptance signal (no measurable change implied).

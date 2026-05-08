@@ -167,6 +167,49 @@ def test_evaluate_blocks_junk_between_marker_and_json() -> None:
     assert "missing required" in reason
 
 
+def test_evaluate_allows_dispatch_with_optional_articles_field() -> None:
+    """Pin the dispatch hook's permissiveness on the optional `articles[]`
+    field (M3 P3). `hooks/check_budget.py` only enforces `files_in_scope` +
+    `forbidden`; the `articles[]` budget field rides through unchanged.
+    Guards against a future hook tightening that silently regresses the
+    dispatch contract.
+    """
+    prompt = (
+        "context_budget:\n"
+        "{\n"
+        '  "spec_sections": ["Acceptance"],\n'
+        '  "files_in_scope": ["src/main.py"],\n'
+        '  "forbidden": ["read entire repo"],\n'
+        '  "return_format": {"max_words": 100},\n'
+        '  "articles": [\n'
+        "    {"
+        '"id": "A1", "title": "Vault", "level": "CRITICAL", '
+        '"rule": "Use vault.", "reference": null, "rationale": null'
+        "}\n"
+        "  ]\n"
+        "}\n"
+    )
+    allow, reason = check_budget.evaluate(prompt)
+    assert allow, "permissive allow -> empty output"
+    assert reason == "ok"
+
+
+def test_evaluate_allows_dispatch_without_articles_field() -> None:
+    """Hook must not require `articles[]` — older dispatches predate it."""
+    prompt = (
+        "context_budget:\n"
+        "{\n"
+        '  "spec_sections": ["Acceptance"],\n'
+        '  "files_in_scope": ["src/main.py"],\n'
+        '  "forbidden": ["read entire repo"],\n'
+        '  "return_format": {"max_words": 100}\n'
+        "}\n"
+    )
+    allow, reason = check_budget.evaluate(prompt)
+    assert allow
+    assert reason == "ok"
+
+
 def test_main_denies_agent_payload_with_modern_pretooluse_shape() -> None:
     payload = {
         "hook_event_name": "PreToolUse",

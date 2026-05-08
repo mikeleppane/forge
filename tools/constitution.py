@@ -94,27 +94,24 @@ def _strip_code_regions(text: str) -> str:
     return _INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), out)
 
 
-def parse_constitution(path: Path) -> list[Article]:
-    """Read .idd/CONSTITUTION.md and return parsed Article records.
+def parse_constitution_text(text: str) -> list[Article]:
+    """Parse an in-memory Constitution body and return Article records.
 
-    Trusts the structural validator (``tools.validate.validate_constitution``)
-    to gate frontmatter + numbering + Rule/Exception presence. This parser
-    is permissive on already-valid files; it raises ``ConstitutionError`` on
-    shape failures the validator would also catch.
+    Public, file-free counterpart to :func:`parse_constitution`. Both share
+    the exact same parser; this entry point exists so callers that already
+    hold the body in memory (e.g. ``classify_change`` comparing two text
+    snapshots) can avoid the TemporaryDirectory dance.
 
     Args:
-        path: Path to the Constitution markdown file.
+        text: Full Constitution body, frontmatter included.
 
     Returns:
         List of parsed Article records in declaration order.
 
     Raises:
-        ConstitutionError: When the file is missing, frontmatter cannot be
-            parsed, or an article header is malformed.
+        ConstitutionError: When frontmatter cannot be parsed or an article
+            header is malformed.
     """
-    if not path.exists():
-        raise ConstitutionError(f"Constitution not found at {path}")
-    text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise ConstitutionError("Constitution missing frontmatter")
     parts = text.split("---\n", 2)
@@ -141,6 +138,29 @@ def parse_constitution(path: Path) -> list[Article]:
     if state.current is not None:
         articles.append(_block_to_article(state.current))
     return articles
+
+
+def parse_constitution(path: Path) -> list[Article]:
+    """Read .idd/CONSTITUTION.md and return parsed Article records.
+
+    Trusts the structural validator (``tools.validate.validate_constitution``)
+    to gate frontmatter + numbering + Rule/Exception presence. This parser
+    is permissive on already-valid files; it raises ``ConstitutionError`` on
+    shape failures the validator would also catch.
+
+    Args:
+        path: Path to the Constitution markdown file.
+
+    Returns:
+        List of parsed Article records in declaration order.
+
+    Raises:
+        ConstitutionError: When the file is missing, frontmatter cannot be
+            parsed, or an article header is malformed.
+    """
+    if not path.exists():
+        raise ConstitutionError(f"Constitution not found at {path}")
+    return parse_constitution_text(path.read_text(encoding="utf-8"))
 
 
 @dataclass
@@ -424,6 +444,10 @@ def filter_articles(
     if not articles:
         return [], []
     scored = [(a, score_article(a, scope_keywords)) for a in articles]
+    # Cache per-article score so the cap pass below does not re-tokenize the
+    # rule body for every kept article. Same {id -> score} numbers the
+    # percentile pass already computed.
+    score_by_id: dict[str, int] = {a.id: s for a, s in scored}
     scores = [s for _, s in scored]
     median = _percentile(scores, 50)
     p25 = _percentile(scores, 25)
@@ -444,7 +468,7 @@ def filter_articles(
     cumulative = sum(a.body_words for a in kept)
     if cumulative > MAX_INJECTED_WORDS:
         kept_with_score = sorted(
-            ((a, score_article(a, scope_keywords)) for a in kept),
+            ((a, score_by_id[a.id]) for a in kept),
             key=lambda pair: (pair[0].level == "CRITICAL", pair[1]),
         )
         kept_after_cap: list[Article] = []

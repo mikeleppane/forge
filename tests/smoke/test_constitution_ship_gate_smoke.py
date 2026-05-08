@@ -36,7 +36,11 @@ def test_gate_acknowledge_writes_full_audit_trail(repo: Path) -> None:
 
     findings = sg.parse_review_findings(review)
     gate, _warn, _info = sg.partition_by_article_level(findings, articles)
-    assert gate, "fixture must surface ≥1 gating finding"
+    # Fixture is sized to exactly one A3 (CRITICAL) finding so the
+    # ACKNOWLEDGE prompt has a deterministic shape. Pinning the count
+    # catches a future fixture drift (extra finding, missing finding) that
+    # `assert gate` alone would miss.
+    assert len(gate) == 1, f"fixture must surface exactly 1 gating finding, got {len(gate)}"
     assert all(f.article_id == "A3" for f in gate)
 
     prompt = sg.render_gate_prompt(gate, articles)
@@ -103,7 +107,7 @@ def test_gate_no_findings_skips_prompt(repo: Path) -> None:
     feature = repo / ".idd" / "features" / FEATURE_ID
     review = feature / "REVIEW.code.md"
     review.write_text(
-        (FIXTURE_ROOT.parents[0] / "_constitution" / "review_no_findings.md").read_text(
+        (FIXTURE_ROOT.parent / "_constitution" / "review_no_findings.md").read_text(
             encoding="utf-8"
         ),
         encoding="utf-8",

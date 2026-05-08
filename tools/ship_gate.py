@@ -113,6 +113,14 @@ def parse_review_findings(path: Path) -> list[ShipFinding]:
     (REVIEW.md template); typos and case mismatches raise ``ShipGateError``
     instead of silently bypassing the gate.
 
+    Asymmetry vs ``validate_deviations``: short or malformed ``| F-`` rows
+    are silently skipped (``continue``) here, whereas the deviation
+    validator BLOCKs on the same shape. The skip is intentional — a
+    REVIEW.code.md is mid-edit during the review convergence loop and
+    blowing up on a half-typed row would force the user to finish the row
+    before re-running the gate. The deviation file is point-in-time audit
+    trail and earns the stricter check.
+
     Args:
         path: Path to REVIEW.code.md.
 
@@ -357,9 +365,10 @@ def render_warn_summary(
 
 # Decisions heading title and deviation cause MUST share their first 60
 # characters (case-insensitive) so `tools.validate.validate_deviations`
-# cross-ref passes. Keep these literals adjacent so future edits stay aligned.
-_DECISIONS_HEADING_PREFIX = "Constitution finding acknowledged at ship"
-_DEVIATION_CAUSE_PREFIX = "Constitution finding acknowledged at ship"
+# cross-ref passes. Single literal — the heading and the cause string are
+# textually identical, so a single source kills the drift risk that two
+# parallel constants invited.
+_ACK_PREFIX = "Constitution finding acknowledged at ship"
 
 
 def make_acknowledgement_hook(
@@ -424,11 +433,7 @@ def make_acknowledgement_hook(
     iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     by_id = {a.id: a for a in articles}
 
-    cause = (
-        _DEVIATION_CAUSE_PREFIX
-        + ": "
-        + ", ".join(f"[constitution:{f.article_id}]" for f in gate_findings)
-    )
+    cause = _ACK_PREFIX + ": " + ", ".join(f"[constitution:{f.article_id}]" for f in gate_findings)
 
     def _record(_source: Path) -> None:
         # Two-sided idempotency: this hook may re-run after a partial-write
@@ -471,7 +476,7 @@ def make_acknowledgement_hook(
             ensure_decisions_file(decisions_path)
             body_lines = [
                 "",
-                f"## {now.date().isoformat()} — {_DECISIONS_HEADING_PREFIX}",
+                f"## {now.date().isoformat()} — {_ACK_PREFIX}",
                 "",
                 # Echo the deviation cause verbatim so `validate_deviations`'
                 # 60-char substring cross-ref locates it inside the body block

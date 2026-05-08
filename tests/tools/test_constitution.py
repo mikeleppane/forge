@@ -242,6 +242,27 @@ def test_parse_constitution_raises_on_unterminated_frontmatter(tmp_path: Path) -
         cn.parse_constitution(bad)
 
 
+def test_parse_constitution_text_round_trips_in_memory_body() -> None:
+    """`parse_constitution_text` parses an in-memory Constitution body without
+    writing anything to disk, sharing the exact loader contract with
+    `parse_constitution(path)`. Public surface so callers (e.g.
+    `tools.constitution_amend.classify_change`) can avoid TemporaryDirectory.
+    """
+    text = (FIXTURES / "passing.md").read_text(encoding="utf-8")
+    via_text = cn.parse_constitution_text(text)
+    via_path = cn.parse_constitution(FIXTURES / "passing.md")
+    assert [a.id for a in via_text] == [a.id for a in via_path]
+    assert via_text[0].title == via_path[0].title
+    assert via_text[0].level == via_path[0].level
+    assert via_text[0].rule == via_path[0].rule
+
+
+def test_parse_constitution_text_raises_on_missing_frontmatter() -> None:
+    """In-memory parser must reject inputs the file parser would also reject."""
+    with pytest.raises(cn.ConstitutionError, match="frontmatter"):
+        cn.parse_constitution_text("## Article 1 — No frontmatter [SHOULD]\n")
+
+
 def test_article_to_budget_dict_preserves_null_optionals() -> None:
     """Articles without Reference/Rationale serialize them as None, not omitted."""
     text = (

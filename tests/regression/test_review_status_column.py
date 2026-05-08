@@ -18,6 +18,11 @@ def test_review_template_has_status_column() -> None:
         "REVIEW.md template missing the Findings table header row starting `| ID |`"
     )
     columns = [c.strip() for c in header.strip("|").split("|")]
+    # `tools.ship_gate.parse_review_findings` looks columns up by name
+    # (`header.index("Status")`, `header.index("Severity")`, ...) so the
+    # absolute position of Status does not matter to the parser. The test
+    # only pins presence; column reordering inside the template is safe so
+    # long as the names stay stable.
     assert "Status" in columns, (
         "REVIEW.md Findings table must have a Status column "
         "(open|resolved|accepted-risk) — required by §5.3.9 ship gate"

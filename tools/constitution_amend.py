@@ -12,8 +12,6 @@ bump (major > minor > patch).
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,12 +19,14 @@ from datetime import date
 from pathlib import Path
 
 from tools.constitution import (
-    Article,
     ConstitutionError,
+    _bare_dep_name,
     _read_package_json_top_level_deps,
     _read_pyproject_top_level_deps,
-    parse_constitution,
+    parse_constitution_text,
 )
+from tools.validate._finding import EXIT_NONZERO_SEVERITIES
+from tools.validate.constitution import validate_constitution
 
 
 class AmendError(RuntimeError):
@@ -36,29 +36,19 @@ class AmendError(RuntimeError):
 _LEVEL_RANK = {"CRITICAL": 3, "SHOULD": 2, "MAY": 1}
 
 
-def _articles_from_text(text: str, tmp_path: Path) -> list[Article]:
-    """Parse the in-memory body via the tmpfile route to reuse parse_constitution."""
-    target = tmp_path / "constitution.md"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
-    return parse_constitution(target)
-
-
 def classify_change(before: str, after: str) -> str:
     """Return 'patch' | 'minor' | 'major' for the diff between two Constitution texts.
 
-    Implementation reads both into Article lists by way of a tmpfile parser
-    pass; raises AmendError if either side fails to parse.
+    Parses both bodies in memory via ``parse_constitution_text``; raises
+    AmendError if either side fails to parse.
     """
     if before == after:
         return "patch"  # noop; caller may abort separately
-    with tempfile.TemporaryDirectory() as raw:
-        tmp = Path(raw)
-        try:
-            before_articles = _articles_from_text(before, tmp / "before")
-            after_articles = _articles_from_text(after, tmp / "after")
-        except ConstitutionError as exc:
-            raise AmendError(f"cannot classify amend: {exc}") from exc
+    try:
+        before_articles = parse_constitution_text(before)
+        after_articles = parse_constitution_text(after)
+    except ConstitutionError as exc:
+        raise AmendError(f"cannot classify amend: {exc}") from exc
 
     before_ids = {a.id: a for a in before_articles}
     after_ids = {a.id: a for a in after_articles}
@@ -70,7 +60,6 @@ def classify_change(before: str, after: str) -> str:
 
     # Iterate ALL level diffs before deciding so a later tightening can't be
     # missed when an earlier diff was a loosening (or vice versa).
-    rank = "patch"
     saw_tighten = False
     saw_loosen = False
     for aid, before_article in before_ids.items():
@@ -87,7 +76,7 @@ def classify_change(before: str, after: str) -> str:
         return "major"  # tighten always wins (even mixed with loosen)
     if saw_loosen:
         return "minor"
-    return rank
+    return "patch"
 
 
 def bump_version(current: str, scope: str) -> str:
@@ -150,23 +139,18 @@ def _read_current_version(text: str) -> str:
 
 
 def _validate_constitution_body(target: Path) -> None:
-    """Run ``python -m tools.validate --target constitution <path>``. Raise on failure.
+    """Run the Constitution structural validator directly. Raise on BLOCK/HIGH.
 
-    Uses ``sys.executable`` so the subprocess inherits the project's venv and the
-    same ``tools.validate`` import path the parent process can resolve. NEVER
-    use ``shutil.which("python")`` here — system Python may lack pyyaml/jsonschema.
+    Calls :func:`tools.validate.constitution.validate_constitution` in-process
+    rather than re-launching ``python -m tools.validate`` — avoids subprocess
+    overhead per amend, and surfaces structured ``Finding`` records instead
+    of stdout/stderr text.
     """
-    proc = subprocess.run(
-        [sys.executable, "-m", "tools.validate", "--target", "constitution", str(target)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise AmendError(
-            f"Constitution validation failed (exit {proc.returncode}): "
-            f"{proc.stdout.strip()} {proc.stderr.strip()}"
-        )
+    findings = validate_constitution(target)
+    blocking = [f for f in findings if f.severity in EXIT_NONZERO_SEVERITIES]
+    if blocking:
+        rendered = "; ".join(f"{f.severity} {f.message}" for f in blocking)
+        raise AmendError(f"Constitution validation failed: {rendered}")
 
 
 def _replace_or_append_frontmatter(text: str, *, new_version: str, today: date) -> str:
@@ -231,11 +215,20 @@ def atomic_replace(target: Path, body: str) -> None:
     ``target.name + '.tmp'``, so one retry path overwrites the previous
     tmpfile and the rename remains the single mutation that flips the
     canonical name.
+
+    Cleanup contract: if ``tmp.replace(target)`` itself fails (rare — e.g.
+    cross-device EXDEV, missing destination dir after concurrent rmtree),
+    the orphan ``.tmp`` file is removed before re-raising so retry logic
+    never has to step over a stale sibling.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text(body, encoding="utf-8")
-    tmp.replace(target)
+    try:
+        tmp.replace(target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 # Backwards-compatible private aliases for in-module call sites.
@@ -368,6 +361,12 @@ def propose_starter_articles(*, repo_root: Path) -> list[ProposedArticle]:
     Reuses ``tools.constitution._read_pyproject_top_level_deps`` /
     ``_read_package_json_top_level_deps`` so dep parsing has one source of truth.
 
+    Detection contract: dep names are tokenized via
+    ``tools.constitution._bare_dep_name`` (strips version specifiers + extras)
+    and lowercased into a set before keyword comparison. Set-membership beats
+    substring match — pre-fix ``"react" in blob`` would false-match against
+    ``preact>=1.0`` and silently mis-detect a non-React project.
+
     Deviation from plan literal: T2 commit 2a10d34 privatized these dep readers
     after the plan was authored. We import the underscored names at module top
     rather than re-implementing them; the lazy/inline import in the plan
@@ -375,9 +374,10 @@ def propose_starter_articles(*, repo_root: Path) -> list[ProposedArticle]:
     """
     pyproject = repo_root / "pyproject.toml"
     package_json = repo_root / "package.json"
-    deps_python = " ".join(_read_pyproject_top_level_deps(pyproject))
-    deps_node = " ".join(_read_package_json_top_level_deps(package_json))
-    blob = (deps_python + " " + deps_node).lower()
+    raw_deps: list[str] = []
+    raw_deps.extend(_read_pyproject_top_level_deps(pyproject))
+    raw_deps.extend(_read_package_json_top_level_deps(package_json))
+    dep_names: set[str] = {_bare_dep_name(d).lower() for d in raw_deps if d}
 
     proposals: list[ProposedArticle] = [
         ProposedArticle(
@@ -392,8 +392,8 @@ def propose_starter_articles(*, repo_root: Path) -> list[ProposedArticle]:
         )
     ]
 
-    has_analytics = any(
-        kw in blob for kw in ("segment", "amplitude", "mixpanel", "heap", "google-analytics")
+    has_analytics = bool(
+        dep_names & {"segment", "amplitude", "mixpanel", "heap", "google-analytics"}
     )
     proposals.append(
         ProposedArticle(
@@ -408,7 +408,7 @@ def propose_starter_articles(*, repo_root: Path) -> list[ProposedArticle]:
         )
     )
 
-    has_orm = any(kw in blob for kw in ("sqlalchemy", "django", "peewee", "tortoise"))
+    has_orm = bool(dep_names & {"sqlalchemy", "django", "peewee", "tortoise"})
     if has_orm:
         proposals.append(
             ProposedArticle(
@@ -424,9 +424,9 @@ def propose_starter_articles(*, repo_root: Path) -> list[ProposedArticle]:
             )
         )
 
-    has_test_framework = any(
-        kw in blob for kw in ("pytest", "unittest", "jest", "vitest", "mocha", "rspec")
-    )
+    # `unittest` is stdlib (never in deps) so it is dropped from the keyword
+    # set; `pytest` covers the Python-test signal.
+    has_test_framework = bool(dep_names & {"pytest", "jest", "vitest", "mocha", "rspec"})
     if has_test_framework:
         proposals.append(
             ProposedArticle(
@@ -441,8 +441,10 @@ def propose_starter_articles(*, repo_root: Path) -> list[ProposedArticle]:
             )
         )
 
-    forbidden_packages = {"left-pad", "request", "node-uuid"}  # extend as needed
-    if any(pkg in blob for pkg in forbidden_packages):
+    # Source: GitHub Advisory Database — node-uuid deprecated 2018, request
+    # unmaintained 2020, left-pad 2016 incident.
+    forbidden_packages = {"left-pad", "request", "node-uuid"}
+    if dep_names & forbidden_packages:
         proposals.append(
             ProposedArticle(
                 title="Forbidden deps",
@@ -456,9 +458,18 @@ def propose_starter_articles(*, repo_root: Path) -> list[ProposedArticle]:
             )
         )
 
-    # Cap kept defensively; the if-chain currently produces <=5 but a future
-    # signal could push past. _BOOTSTRAP_PROPOSALS_CAP is the contract floor.
-    return proposals[:_BOOTSTRAP_PROPOSALS_CAP]
+    # The if-chain produces <=5 proposals (Secrets + PII + ORM + Tests +
+    # Forbidden). A runtime check (rather than a silent slice) forces a
+    # reviewer to revisit `_BOOTSTRAP_PROPOSALS_CAP` whenever a sixth signal
+    # is wired in. AmendError because the only legitimate caller is the
+    # bootstrap lifecycle, and aborting there is the right shape for a
+    # programmer error.
+    if len(proposals) > _BOOTSTRAP_PROPOSALS_CAP:
+        raise AmendError(
+            f"propose_starter_articles produced {len(proposals)} > "
+            f"{_BOOTSTRAP_PROPOSALS_CAP}; bump the cap or trim signals"
+        )
+    return proposals
 
 
 def _format_article(proposal: ProposedArticle, number: int) -> str:

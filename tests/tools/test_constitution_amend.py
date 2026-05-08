@@ -381,6 +381,27 @@ def test_propose_starter_articles_picks_orm_and_test_floor(tmp_path: Path) -> No
     assert len(proposals) <= 5, "default cap = 5"
 
 
+def test_propose_starter_articles_uses_bare_dep_name_match_not_substring(
+    tmp_path: Path,
+) -> None:
+    """Detection MUST tokenize dep names before comparison, not substring-match.
+
+    A dep entry like ``preact>=10`` would false-match against ``"react"`` under
+    the old ``kw in blob`` substring check. Once any future signal extends the
+    keyword set with ``"react"``, this test guards the bare-name boundary so
+    ``preact`` never silently trips a React-shaped article.
+    """
+    repo = tmp_path / "preact_only"
+    repo.mkdir()
+    (repo / "package.json").write_text('{"dependencies": {"preact": "^10"}}', encoding="utf-8")
+    proposals = am.propose_starter_articles(repo_root=repo)
+    # ORM/test signals must not fire on `preact` alone (covers `pytest` substring
+    # match too — `preact` contains neither).
+    titles = {p.title.lower() for p in proposals}
+    assert not any("repository" in t for t in titles)
+    assert not any("test coverage" in t for t in titles)
+
+
 def test_propose_starter_articles_no_orm_no_test_only_minimum(tmp_path: Path) -> None:
     repo = tmp_path / "minimal"
     repo.mkdir()

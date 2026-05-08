@@ -180,3 +180,42 @@ def test_domain_skill_documents_fence_aware_section_scan() -> None:
     assert "fenced" in text.lower(), (
         "SKILL.md must explicitly mention fenced code blocks in the H1-shadowing rule"
     )
+
+
+# ---------------------------------------------------------------------------
+# 12. Skill is marked explicit (disable-model-invocation: true)
+# ---------------------------------------------------------------------------
+
+
+def test_domain_skill_disable_model_invocation_true() -> None:
+    """AGENTS.md classifies forge-domain as 'explicit' = disable-model-invocation: true."""
+    text = _read(SKILL_PATH)
+    assert "disable-model-invocation: true" in text, (
+        "SKILL.md frontmatter must set 'disable-model-invocation: true' so the "
+        "skill is invoked only via /forge:domain, matching the AGENTS.md "
+        "'explicit' classification"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 13. Skill points at the helper that actually exists
+# ---------------------------------------------------------------------------
+
+
+def test_domain_skill_references_existing_strip_code_helper() -> None:
+    """`_strip_code` lives in `tools.validate._frontmatter` and is imported by
+    `tools.validate.spec_structural`. `_mask_fenced_lines` does NOT exist in
+    `tools.validate` (it lives in `tools.delta_merge`). The skill must point
+    at the real helper to avoid future agents inventing a new section parser.
+    """
+    text = _read(SKILL_PATH)
+    assert "_strip_code" in text, "SKILL.md must reference the canonical `_strip_code` helper"
+    assert "tools.validate._frontmatter" in text, (
+        "SKILL.md must locate `_strip_code` in tools.validate._frontmatter — the "
+        "module where it actually lives — rather than tools.validate.spec_structural"
+    )
+    assert "_mask_fenced_lines" not in text, (
+        "SKILL.md must NOT reference `_mask_fenced_lines` in tools.validate — that "
+        "helper does not exist there; the only `_mask_fenced_lines` lives in "
+        "tools.delta_merge for an unrelated purpose"
+    )

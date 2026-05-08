@@ -416,3 +416,84 @@ def test_increment_refine_attempts_raises_when_routing_block_absent(
     # No partial write — file must remain unchanged (no routing block).
     persisted = json.loads(target.read_text(encoding="utf-8"))
     assert "routing" not in persisted
+
+
+def test_increment_refine_attempts_rejects_string_count_without_schema(
+    tmp_path: Path,
+) -> None:
+    """Without schema_path, a tampered string must surface as StateError, not ValueError."""
+    target = tmp_path / "state.json"
+    payload = _routed_payload()
+    payload["routing"]["refine_attempts"] = "4"
+    state.write_state(target, payload)  # no schema_path → no validation gate
+
+    with pytest.raises(state.StateError) as excinfo:
+        state.increment_refine_attempts(target)  # no schema_path
+
+    message = str(excinfo.value)
+    assert "refine_attempts" in message
+    assert "integer" in message
+    assert "str" in message
+    # No write happened — file body unchanged.
+    persisted = json.loads(target.read_text(encoding="utf-8"))
+    assert persisted["routing"]["refine_attempts"] == "4"
+
+
+def test_increment_refine_attempts_rejects_garbage_string_without_schema(
+    tmp_path: Path,
+) -> None:
+    """A non-numeric string must NOT bubble ValueError from int(); helper owns the contract."""
+    target = tmp_path / "state.json"
+    payload = _routed_payload()
+    payload["routing"]["refine_attempts"] = "abc"
+    state.write_state(target, payload)
+
+    with pytest.raises(state.StateError, match="integer"):
+        state.increment_refine_attempts(target)
+
+
+def test_increment_refine_attempts_rejects_bool_without_schema(tmp_path: Path) -> None:
+    """`bool` is a Python `int` subclass — explicit reject so True+1==2 cannot leak."""
+    target = tmp_path / "state.json"
+    payload = _routed_payload()
+    payload["routing"]["refine_attempts"] = True
+    state.write_state(target, payload)
+
+    with pytest.raises(state.StateError) as excinfo:
+        state.increment_refine_attempts(target)
+
+    message = str(excinfo.value)
+    assert "bool" in message
+    assert "integer" in message
+
+
+def test_increment_refine_attempts_rejects_negative_without_schema(tmp_path: Path) -> None:
+    target = tmp_path / "state.json"
+    payload = _routed_payload()
+    payload["routing"]["refine_attempts"] = -1
+    state.write_state(target, payload)
+
+    with pytest.raises(state.StateError, match="negative"):
+        state.increment_refine_attempts(target)
+
+
+def test_state_schema_rejects_refined_idea_over_cap(tmp_path: Path, schemas_dir: Path) -> None:
+    """Schema-level maxLength must mirror the helper's _REFINED_IDEA_MAX_CHARS cap."""
+    payload = _base_payload()
+    payload["refined_idea"] = "z" * 4001
+    target = tmp_path / "state.json"
+
+    with pytest.raises(state.StateError, match="schema"):
+        state.write_state(target, payload, schema_path=schemas_dir / "state.schema.json")
+
+    assert not target.exists()
+
+
+def test_state_schema_accepts_refined_idea_at_cap(tmp_path: Path, schemas_dir: Path) -> None:
+    payload = _base_payload()
+    payload["refined_idea"] = "z" * 4000
+    target = tmp_path / "state.json"
+
+    state.write_state(target, payload, schema_path=schemas_dir / "state.schema.json")
+
+    assert len(json.loads(target.read_text(encoding="utf-8"))["refined_idea"]) == 4000

@@ -127,7 +127,8 @@
       }
     },
     "refined_idea": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 4000
     }
   }
 }

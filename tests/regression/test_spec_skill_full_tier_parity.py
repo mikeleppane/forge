@@ -115,3 +115,51 @@ def test_spec_skill_locks_placeholder_comparator() -> None:
         "SKILL.md must call out that backslash-escaped placeholder variants do "
         "not match (deep-M3 drift mode)"
     )
+
+
+# ---------------------------------------------------------------------------
+# 8. next_phase resolution after spec is per-tier deterministic, not free-form
+# ---------------------------------------------------------------------------
+
+
+def test_spec_skill_documents_per_tier_next_phase_resolution() -> None:
+    """`next_phase` after spec must be derived from `state.json.tier`, not from a
+    free-form user request. Otherwise the full-tier `# Domain` placeholder can
+    leak past spec exit when the user requests anything other than `domain`.
+    """
+    assert "tier" in _BODY and "next_phase" in _BODY, (
+        "SKILL.md Step 8 must mention `tier` and `next_phase` together"
+    )
+
+    expectations = (
+        ("focused", "execute"),
+        ("standard", "scenarios"),
+        ("full", "domain"),
+    )
+    for tier, phase in expectations:
+        assert tier in _BODY, f"SKILL.md must spell out the `{tier}` tier mapping"
+        assert phase in _BODY, f"SKILL.md must name `{phase}` as the next phase for some tier"
+
+    # The vague pre-fix wording must be gone — a tier-blind "first phase the user
+    # requested" reading is exactly what allowed the placeholder to leak.
+    assert "first phase the user requested" not in _BODY, (
+        "SKILL.md must not pick `next_phase` from a free-form user request — "
+        "the tier alone determines it"
+    )
+
+
+def test_spec_skill_full_tier_next_phase_is_domain() -> None:
+    """The full-tier route MUST advance to the dedicated /forge:domain phase so
+    the `_TBD: filled by /forge:domain_` placeholder is populated before spec
+    is consumed downstream. Phrased in prose ("when the feature's tier is
+    `full`") to satisfy the `test_scan_is_not_tier_gated` regression that
+    forbids the literal `tier == "full"` substring in this skill body.
+    """
+    assert "tier is `full`" in _BODY, (
+        "SKILL.md must state that when the feature's tier is `full`, next_phase "
+        'resolves to `domain` (prose form to avoid the forbidden `tier == "full"` '
+        "substring guarded by test_scan_is_not_tier_gated)"
+    )
+    assert '"domain"' in _BODY, (
+        'SKILL.md Step 8 must literally name `"domain"` as the resolved next_phase for full tier'
+    )

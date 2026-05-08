@@ -353,7 +353,8 @@ def increment_refine_attempts(
 
     Raises:
         StateError: ``current_phase`` is not ``refine``, the routing block is
-            absent (call ``/forge:do`` first), or schema validation fails.
+            absent (call ``/forge:do`` first), ``routing.refine_attempts`` is
+            present but not a non-negative integer, or schema validation fails.
     """
     payload = read_state(path, schema_path=schema_path)
 
@@ -371,8 +372,20 @@ def increment_refine_attempts(
             "/forge:do must run before /forge:refine"
         )
 
-    current = routing.get("refine_attempts", 0)
-    new_count = int(current) + 1
+    raw_current: Any = routing.get("refine_attempts", 0)
+    if isinstance(raw_current, bool) or not isinstance(raw_current, int):
+        raise StateError(
+            f"cannot increment refine_attempts: routing.refine_attempts "
+            f"must be an integer, got {type(raw_current).__name__} "
+            f"({raw_current!r}) in {path}"
+        )
+    current: int = raw_current
+    if current < 0:
+        raise StateError(
+            f"cannot increment refine_attempts: routing.refine_attempts "
+            f"is negative ({current}) in {path}"
+        )
+    new_count = current + 1
     routing["refine_attempts"] = new_count
 
     write_state(path, payload, schema_path=schema_path)

@@ -148,3 +148,69 @@ def test_refine_command_frontmatter_has_argument_hint() -> None:
     assert "--feature" in text, (
         "commands/refine.md frontmatter argument-hint must mention '--feature'"
     )
+
+
+# ---------------------------------------------------------------------------
+# 11. Skill is marked explicit (disable-model-invocation: true)
+# ---------------------------------------------------------------------------
+
+
+def test_refine_skill_disable_model_invocation_true() -> None:
+    """AGENTS.md classifies forge-refine as 'explicit' = disable-model-invocation: true.
+    Without this, Claude Code may auto-load the skill on description match,
+    contradicting the documented command-only phase model.
+    """
+    text = _read(SKILL_PATH)
+    assert "disable-model-invocation: true" in text, (
+        "SKILL.md frontmatter must set 'disable-model-invocation: true' so the "
+        "skill is invoked only via /forge:refine, matching the AGENTS.md "
+        "'explicit' classification"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 12. Command argument-hint accepts optional <idea> (plan T2/T3)
+# ---------------------------------------------------------------------------
+
+
+def test_refine_command_argument_hint_includes_idea() -> None:
+    """Plan T2 specifies `/forge:refine [--feature <id>] [<idea>]`.
+
+    Until /forge:do --full ships in P6.2, the CLI <idea> arg is the
+    documented direct-invocation path. Without it the README's 'standalone
+    usable' claim has no normal bootstrap.
+    """
+    text = _read(COMMAND_PATH)
+    assert "[<idea>]" in text, (
+        "commands/refine.md argument-hint must accept optional `<idea>` per plan T2"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 13. Skill body documents CLI idea fallback path
+# ---------------------------------------------------------------------------
+
+
+def test_refine_skill_documents_cli_idea_fallback() -> None:
+    text = _read(SKILL_PATH)
+    assert "record_routing_decision" in text, (
+        "SKILL.md must instruct seeding routing via record_routing_decision when "
+        "routing.idea is absent and CLI <idea> was passed"
+    )
+    assert "ignore" in text.lower() or "ignored" in text.lower(), (
+        "SKILL.md must say CLI <idea> is ignored when routing.idea is already set "
+        "(routing is the canonical record)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 14. Skill documents bootstrap caveat (until P6.2)
+# ---------------------------------------------------------------------------
+
+
+def test_refine_skill_documents_bootstrap_caveat() -> None:
+    text = _read(SKILL_PATH)
+    assert "P6.2" in text or "/forge:do --full" in text, (
+        "SKILL.md must reference the P6.2 bootstrap caveat — refine cannot "
+        "create the feature folder; /forge:spec or /forge:do --full must precede"
+    )

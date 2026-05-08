@@ -2,6 +2,7 @@
 name: forge-refine
 description: Socratic vague-idea collapse before /forge:spec. Use when /forge:do (full tier) routes to refine, or when the user invokes /forge:refine directly.
 model: sonnet
+disable-model-invocation: true
 ---
 
 # FORGE Refine
@@ -17,9 +18,25 @@ directly against an active feature whose `current_phase` is already `refine`.
 - `--feature <id>` — optional. Single-active rule applies: when omitted, resolve
   the only feature whose `state.json.current_phase != "done"`; abort if zero
   or multiple match.
-- Idea text — read from `state.json.routing.idea` (seeded by `/forge:do --full`).
-  Refine does not accept an idea on the CLI; if `routing.idea` is absent the
-  user must run `/forge:do --full <idea>` first.
+- `[<idea>]` — optional positional. CLI fallback for the idea text when
+  `state.json.routing.idea` is absent. Until `/forge:do --full` ships
+  (deferred to M3 P6.2), this is the documented direct-invocation path:
+  `/forge:refine [--feature <id>] "<idea text>"`.
+- Idea source precedence: when `state.json.routing.idea` is present (seeded
+  by `/forge:do --full`), use it and **ignore** any CLI `<idea>` (do not
+  overwrite — routing is the canonical record). When absent AND CLI `<idea>`
+  is given, seed the routing block first via
+  `tools.state.record_routing_decision(path, idea=<idea>, final_tier="full",
+  proposed_tier="full", rationale="direct /forge:refine invocation")` so
+  `routing.refine_attempts` has a parent block to live under. When **both**
+  are absent, abort with: `"/forge:refine needs an idea — pass one as an
+  argument: /forge:refine \"<idea text>\""`.
+- Bootstrap caveat (until M3 P6.2 ships `/forge:do --full`): the feature
+  folder + `state.json` at `current_phase == "refine"` must already exist.
+  `/forge:refine` does NOT create the feature folder — that's `/forge:spec`'s
+  job. To bootstrap manually, ask the user to first create the folder via
+  the `/forge:spec` template path then flip `current_phase` to `refine`, or
+  wait for P6.2.
 
 ## Steps
 
@@ -31,8 +48,16 @@ directly against an active feature whose `current_phase` is already `refine`.
    `"cannot increment refine_attempts: current_phase is '<X>', expected 'refine'"`.
    Do not invent a custom abort string; the helper is the single source of
    truth so users see consistent errors across phases.
-3. **Read seeded idea.** Pull `state.json.routing.idea`. Abort if missing —
-   instruct the user to run `/forge:do --full <idea>` first so routing is seeded.
+3. **Resolve idea source.** Pull `state.json.routing.idea`. If present, use it
+   and ignore any CLI `<idea>` argument (routing is the canonical record;
+   do not overwrite). If `routing.idea` is absent AND a CLI `<idea>` was
+   passed, seed the routing block first via
+   `tools.state.record_routing_decision(path, idea=<idea>, final_tier="full",
+   proposed_tier="full", rationale="direct /forge:refine invocation")` —
+   this satisfies the schema requirement that `routing` carry `idea`,
+   `final_tier`, and `decided_at`, and gives `increment_refine_attempts` a
+   block to mutate. If **both** are absent, abort with:
+   `"/forge:refine needs an idea — pass one as an argument: /forge:refine \"<idea text>\""`.
 4. **Detect ambiguity.** Scan the idea for vague verbs ("improve", "better",
    "fix"), compound goals (multiple "and"-joined outcomes), and missing
    acceptance signal (no measurable change implied).

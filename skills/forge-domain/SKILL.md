@@ -2,6 +2,7 @@
 name: forge-domain
 description: Glossary table + optional Mermaid sketch for full-tier feature SPEC.md. Use when /forge:do (full tier) advances to the domain phase, or when the user invokes /forge:domain directly.
 model: sonnet
+disable-model-invocation: true
 ---
 
 # FORGE Domain
@@ -44,9 +45,12 @@ tiers fill `# Domain` at spec time and never enter this phase.
    `# Intent`, `# Scenarios`, or `# Domain` headers, mask out fenced code
    blocks (` ``` ` and ` ~~~ ` delimited regions) before matching — fenced
    examples that contain literal `# Header` lines must not shadow real H1
-   sections. Mirror the masking helper in `tools.validate.spec_structural`
-   (see `_strip_code` / `_mask_fenced_lines`) rather than rolling a naive
-   `re.search(r"^# Domain", ...)` regex.
+   sections. Use the canonical helper `tools.validate._frontmatter._strip_code`
+   (also imported and used by `tools.validate.spec_structural` and
+   `tools.validate.constitution` — it preserves byte offsets by replacing
+   fenced + inline code regions with same-length whitespace) rather than
+   rolling a naive `re.search(r"^# Domain", ...)` regex. Do not invent a
+   new section parser; reuse `_strip_code` exactly as `spec_structural` does.
 4. **Project signals.** Read `pyproject.toml` (or `package.json`) for
    ecosystem hints — language, framework, declared dependencies. These bias
    which terms count as "generic" vs "domain" (e.g., `request` is generic in

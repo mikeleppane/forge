@@ -229,6 +229,19 @@ def test_parse_constitution_ignores_article_headers_inside_fenced_code(tmp_path:
     assert ids == ["A1"], f"only the real article should be parsed, got {ids}"
 
 
+def test_parse_constitution_raises_on_unterminated_frontmatter(tmp_path: Path) -> None:
+    """M1 — malformed (unterminated) frontmatter must surface ConstitutionError.
+
+    Pre-fix `_, fm, body = text.split('---\\n', 2)` raised a raw ValueError
+    when the closing `---` was missing, leaking a non-domain exception into
+    the preflight loader.
+    """
+    bad = tmp_path / "no_close.md"
+    bad.write_text("---\nversion: 0.1.0\n\n## Article 1 — Demo [SHOULD]\n", encoding="utf-8")
+    with pytest.raises(cn.ConstitutionError, match="frontmatter"):
+        cn.parse_constitution(bad)
+
+
 def test_article_to_budget_dict_preserves_null_optionals() -> None:
     """Articles without Reference/Rationale serialize them as None, not omitted."""
     text = (

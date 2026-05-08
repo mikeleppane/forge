@@ -65,6 +65,11 @@ _HEADER_RE = re.compile(r"^## Article (\d+) — (.+) \[(CRITICAL|SHOULD|MAY)\]\s
 _FIELD_RE = re.compile(r"^\*\*(Rule|Reference|Rationale|Exception):\*\*\s*(.*)$")
 _FIELD_KEYS = ("rule", "reference", "rationale", "exception")
 
+# `text.split("---\n", 2)` returns 3 elements on properly terminated
+# frontmatter (`prefix`, `frontmatter_block`, `body`); fewer when the closing
+# delimiter is missing. Naming the boundary keeps the magic-value lint quiet.
+_FRONTMATTER_PARTS_REQUIRED = 3
+
 # Loader/validator must agree on what counts as an article header. The
 # structural validator (tools.validate._frontmatter._strip_code) blanks
 # fenced + inline code regions before scanning so illustrative quotes
@@ -112,7 +117,13 @@ def parse_constitution(path: Path) -> list[Article]:
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise ConstitutionError("Constitution missing frontmatter")
-    _, frontmatter_block, body = text.split("---\n", 2)
+    parts = text.split("---\n", 2)
+    if len(parts) < _FRONTMATTER_PARTS_REQUIRED:
+        # Unterminated frontmatter: closing `---` never showed up. Wrap the
+        # would-be ValueError into the domain error so callers can match on
+        # ConstitutionError uniformly.
+        raise ConstitutionError("frontmatter missing closing ---")
+    _, frontmatter_block, body = parts
     try:
         yaml.safe_load(frontmatter_block)  # parsed for side-effect validation
     except yaml.YAMLError as exc:

@@ -424,6 +424,62 @@ def test_partition_routes_block_severity_should_finding_to_warn() -> None:
     assert {f.article_id for f in warn} == {"A4"}
 
 
+def test_ack_hook_raises_ship_gate_error_on_corrupt_state_json(tmp_path: Path) -> None:
+    """M2 — corrupt state.json must surface ShipGateError, not raw JSONDecodeError.
+
+    Pre-fix the ACK hook called `json.loads(state_path.read_text(...))` with
+    no try/except, leaking a raw JSONDecodeError into ship_feature's
+    pre_archive_hook caller and burying the actual cause behind the generic
+    ArchiveError wrap.
+    """
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{not json at all", encoding="utf-8")
+    decisions_path = tmp_path / "decisions.md"
+    decisions_path.write_text("# Decisions\n\n", encoding="utf-8")
+    findings = sg.parse_review_findings(FIXTURES / "review_with_critical_finding.md")
+    gate, _w, _i = sg.partition_by_article_level(findings, _articles())
+
+    hook = sg.make_acknowledgement_hook(
+        state_path=state_path,
+        decisions_path=decisions_path,
+        gate_findings=gate,
+        articles=_articles(),
+        now=datetime(2026, 5, 7, 12, 0, 0, tzinfo=UTC),
+    )
+    with pytest.raises(sg.ShipGateError, match=r"state\.json is corrupt"):
+        hook(tmp_path)
+
+
+def test_parse_review_findings_skips_untagged_rows_with_unusual_status(tmp_path: Path) -> None:
+    """M3 — Status vocab check applies only to constitution-tagged rows.
+
+    Pre-fix, the Status validity check ran BEFORE the tag check, so an
+    untagged row with a typo Status (e.g. `In progress`) raised
+    ShipGateError even though the row was not gate-eligible. Move the
+    Status check after the tag presence check so untagged rows pass through
+    silently regardless of Status content.
+    """
+    src = tmp_path / "review_untagged_weird_status.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|----------|---------|-----------------|--------|
+| F-1 | HIGH | in-progress | src/x.py:1 | trailing whitespace (no constitution tag) | strip | self |
+""",
+        encoding="utf-8",
+    )
+    # Untagged row -> not gate-eligible -> Status typo must not raise.
+    assert sg.parse_review_findings(src) == []
+
+
 def test_parse_review_findings_returns_empty_when_no_findings_section(tmp_path: Path) -> None:
     """H4 — without a `# Findings` heading the parser must return [], not raise.
 

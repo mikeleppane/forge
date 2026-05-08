@@ -188,6 +188,15 @@ def _findings_from_row(
         message = cells[header.index("Problem")]
     except ValueError:
         return []  # malformed table; skip
+    # Tag check FIRST. The closed Status / Severity vocabularies only matter
+    # for constitution-tagged rows (those are the ones that influence the
+    # gate). An untagged row with an unusual Status (e.g. "in-progress" or a
+    # typo) is reviewer convergence-history that this parser can ignore;
+    # validating its Status would raise ShipGateError on rows the gate
+    # never cared about in the first place.
+    tag_ids = _TAG_RE.findall(message)
+    if not tag_ids:
+        return []
     if status_col >= 0:
         row_status = cells[status_col].lower()
         if row_status not in _VALID_STATUS_VALUES:
@@ -201,7 +210,6 @@ def _findings_from_row(
         raise ShipGateError(f"unrecognized Severity value: {severity!r} in {source}")
     # findall keeps every tag in declaration order; one ShipFinding per tag
     # so each routes through partition_by_article_level on its own merits.
-    tag_ids = _TAG_RE.findall(message)
     return [
         ShipFinding(
             article_id=article_id,
@@ -376,7 +384,12 @@ def make_acknowledgement_hook(
         Callable matching ``Callable[[Path], None]`` for ``ship_feature``.
 
     Raises:
-        ShipGateError: When ``state_path`` does not exist at hook-build time.
+        ShipGateError: When ``state_path`` does not exist at hook-build time,
+            or when the file exists but is not parseable JSON at hook-call
+            time. Wrapping ``JSONDecodeError`` here keeps the failure mode
+            on-domain — ship_feature's outer ArchiveError wrap surfaces a
+            clear "state.json corrupt" cause instead of a raw decoder
+            traceback.
     """
     if not state_path.exists():
         raise ShipGateError(f"state.json not found at {state_path}")
@@ -399,7 +412,14 @@ def make_acknowledgement_hook(
         # matching state.json deviation entry is the recovery scenario we must
         # tolerate so the second attempt can complete the state.json write
         # without appending a duplicate decisions heading.
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            # On-domain wrap so ship_feature's outer ArchiveError surfaces a
+            # readable "state.json is corrupt" message instead of a raw
+            # decoder traceback. Re-running the hook against a corrupt file
+            # would never recover; the caller must repair state.json first.
+            raise ShipGateError(f"state.json is corrupt: {exc}") from exc
         deviations: list[dict[str, str]] = payload.setdefault("deviations", [])
         already_in_state = any(d.get("cause") == cause for d in deviations)
         if already_in_state:

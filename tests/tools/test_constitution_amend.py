@@ -283,6 +283,52 @@ def test_amend_constitution_rejects_empty_decisions_body(tmp_path: Path) -> None
     assert not decisions_path.exists()
 
 
+def test_amend_rollback_removes_decisions_file_when_we_created_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Atomic-pair contract: when decisions.md did NOT exist before the amend,
+    a decisions-append failure must remove the auto-created file along with
+    rolling back the Constitution. Otherwise the bare header file lingers."""
+    repo = tmp_path / "repo"
+    (repo / ".idd").mkdir(parents=True)
+    constitution = repo / ".idd" / "CONSTITUTION.md"
+    original = (FIXTURES / "passing.md").read_text(encoding="utf-8")
+    constitution.write_text(original, encoding="utf-8")
+    decisions_path = repo / "decisions.md"
+    assert not decisions_path.exists(), "precondition: no decisions.md yet"
+
+    after_text = original.replace(
+        "Hard-coded credentials are the most common cause",
+        "Hard-coded credentials remain the most common cause",
+    )
+    inputs = StubInputs(editor_writes=after_text, decisions_entry="text edit only")
+
+    original_open = Path.open
+
+    def patched(self, *a, **kw):  # type: ignore[no-untyped-def]
+        if self == decisions_path and a and a[0] == "a":
+            raise OSError("simulated decisions append failure")
+        return original_open(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "open", patched)
+
+    with pytest.raises(am.AmendError, match=r"decisions\.md append failed"):
+        am.amend_constitution(
+            repo_root=repo,
+            decisions_path=decisions_path,
+            editor=inputs.open_editor,
+            prompter=inputs.prompt_decisions,
+            today=date(2026, 5, 7),
+        )
+
+    assert constitution.read_text(encoding="utf-8") == original
+    assert not decisions_path.exists(), (
+        "decisions.md was created by _ensure_decisions_file but never written; "
+        "rollback must remove it to keep the atomic-pair contract"
+    )
+
+
 def test_amend_constitution_replaces_existing_updated_field(tmp_path: Path) -> None:
     """Cover the _replace_or_append_frontmatter replace branch (every amend after the first)."""
     repo = tmp_path / "repo"
@@ -488,3 +534,45 @@ def test_bootstrap_constitution_rolls_back_constitution_on_decisions_append_fail
     # Constitution must be gone; decisions log unchanged.
     assert not (repo / ".idd" / "CONSTITUTION.md").exists()
     assert decisions_path.read_text(encoding="utf-8") == "# Decisions\n\n"
+
+
+def test_bootstrap_rollback_removes_decisions_file_when_we_created_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Atomic-pair contract for bootstrap: an append failure with no
+    pre-existing decisions.md must delete BOTH the freshly-written
+    Constitution AND the decisions.md auto-created in this call."""
+    repo = tmp_path / "repo"
+    (repo / ".idd").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\ndependencies = ["pytest>=8.0"]\n',
+        encoding="utf-8",
+    )
+    decisions_path = repo / "decisions.md"
+    assert not decisions_path.exists(), "precondition: no decisions.md yet"
+
+    original_open = Path.open
+
+    def _patched_open(self, *a, **kw):  # type: ignore[no-untyped-def]
+        if self == decisions_path and a and a[0] == "a":
+            raise OSError("simulated append failure")
+        return original_open(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "open", _patched_open)
+
+    accept_all = lambda proposal: ("accept", proposal)  # noqa: E731
+
+    with pytest.raises(am.AmendError, match=r"decisions\.md append failed"):
+        am.bootstrap_constitution(
+            repo_root=repo,
+            decisions_path=decisions_path,
+            review_proposal=accept_all,
+            today=date(2026, 5, 7),
+        )
+
+    assert not (repo / ".idd" / "CONSTITUTION.md").exists()
+    assert not decisions_path.exists(), (
+        "decisions.md was created by _ensure_decisions_file but never written; "
+        "rollback must remove it to keep the atomic-pair contract"
+    )

@@ -201,16 +201,23 @@ def _format_decisions_entry(*, today: date, new_version: str, scope: str, body: 
     )
 
 
-def _ensure_decisions_file(decisions_path: Path) -> None:
+def _ensure_decisions_file(decisions_path: Path) -> bool:
     """Create ``decisions.md`` with the standard header if absent.
 
     Constitution amends are repo-level decisions and the validator's
     deviations cross-ref needs a decisions.md to exist. Auto-create on first
     amend rather than crash mid-lifecycle.
+
+    Returns:
+        True when the file was created in this call (rollback callers must
+        remove it on append failure to keep the atomic-pair contract). False
+        when the file already existed.
     """
-    if not decisions_path.exists():
-        decisions_path.parent.mkdir(parents=True, exist_ok=True)
-        decisions_path.write_text("# Decisions\n\n", encoding="utf-8")
+    if decisions_path.exists():
+        return False
+    decisions_path.parent.mkdir(parents=True, exist_ok=True)
+    decisions_path.write_text("# Decisions\n\n", encoding="utf-8")
+    return True
 
 
 def _atomic_replace(target: Path, body: str) -> None:
@@ -299,11 +306,13 @@ def amend_constitution(
     finally:
         candidate.unlink(missing_ok=True)
 
-    _ensure_decisions_file(decisions_path)
+    decisions_created = _ensure_decisions_file(decisions_path)
 
     # Atomic-pair write: Constitution first via os.replace, then decisions
     # append. On decisions-append failure, restore Constitution to `before`
-    # so both files end at pre-amend state.
+    # so both files end at pre-amend state. If we created decisions.md in
+    # _ensure_decisions_file, remove it on rollback — leaving the bare header
+    # behind would violate the "both files end at pre-amend state" contract.
     _atomic_replace(constitution, after)
     entry = _format_decisions_entry(
         today=today, new_version=new_version, scope=scope, body=decisions_body
@@ -312,8 +321,9 @@ def amend_constitution(
         with decisions_path.open("a", encoding="utf-8") as fh:
             fh.write(entry)
     except OSError as exc:
-        # Restore Constitution; surface the underlying error.
         _atomic_replace(constitution, before)
+        if decisions_created:
+            decisions_path.unlink(missing_ok=True)
         raise AmendError(
             f"decisions.md append failed; Constitution restored to v{current_version}: {exc}"
         ) from exc
@@ -512,9 +522,9 @@ def bootstrap_constitution(
 
     # Atomic-pair write: ensure decisions.md parent exists, atomically write
     # the Constitution, then append the bootstrap ADR. If the append fails
-    # (read-only fs, etc.) delete the freshly-written Constitution so the
-    # pair stays atomic.
-    _ensure_decisions_file(decisions_path)
+    # (read-only fs, etc.) delete the freshly-written Constitution AND any
+    # decisions.md that this call created so the pair stays atomic.
+    decisions_created = _ensure_decisions_file(decisions_path)
     _atomic_replace(constitution, body)
     entry = (
         f"\n## {today.isoformat()} — Constitution bootstrap: v0.1.0\n"
@@ -528,5 +538,7 @@ def bootstrap_constitution(
             fh.write(entry)
     except OSError as exc:
         constitution.unlink(missing_ok=True)
+        if decisions_created:
+            decisions_path.unlink(missing_ok=True)
         raise AmendError(f"decisions.md append failed: {exc}") from exc
     return constitution

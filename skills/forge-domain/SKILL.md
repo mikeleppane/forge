@@ -17,7 +17,7 @@ tiers fill `# Domain` at spec time and never enter this phase.
 ## Inputs
 
 - `--feature <id>` — optional. Single-active rule applies: when omitted,
-  resolve the only feature whose `state.json.current_phase != "shipped"`;
+  resolve the only feature whose `state.json.current_phase != "done"`;
   abort if zero or multiple match.
 - `SPEC.md` (read-only) — pulls `# Intent` and `# Scenarios` sections as the
   term-extraction corpus. The `# Domain` section is left as the in-place

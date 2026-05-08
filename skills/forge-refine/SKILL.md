@@ -15,7 +15,7 @@ directly against an active feature whose `current_phase` is already `refine`.
 ## Inputs
 
 - `--feature <id>` — optional. Single-active rule applies: when omitted, resolve
-  the only feature whose `state.json.current_phase != "shipped"`; abort if zero
+  the only feature whose `state.json.current_phase != "done"`; abort if zero
   or multiple match.
 - Idea text — read from `state.json.routing.idea` (seeded by `/forge:do --full`).
   Refine does not accept an idea on the CLI; if `routing.idea` is absent the

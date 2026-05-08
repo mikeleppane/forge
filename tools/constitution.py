@@ -62,7 +62,8 @@ class Article:
 
 
 _HEADER_RE = re.compile(r"^## Article (\d+) — (.+) \[(CRITICAL|SHOULD|MAY)\]\s*$")
-_FIELD_RE = re.compile(r"^\*\*(Rule|Reference|Rationale|Exception):\*\*\s*(.+)$")
+_FIELD_RE = re.compile(r"^\*\*(Rule|Reference|Rationale|Exception):\*\*\s*(.*)$")
+_FIELD_KEYS = ("rule", "reference", "rationale", "exception")
 
 
 def parse_constitution(path: Path) -> list[Article]:
@@ -95,52 +96,85 @@ def parse_constitution(path: Path) -> list[Article]:
         raise ConstitutionError(f"frontmatter parse error: {exc}") from exc
 
     articles: list[Article] = []
-    current: dict[str, Any] | None = None
-
-    def _commit(block: dict[str, Any]) -> None:
-        rule = block.get("rule", "").strip()
-        reference = block.get("reference", "").strip() or None
-        rationale = block.get("rationale", "").strip() or None
-        body_words = len((rule + " " + (reference or "") + " " + (rationale or "")).split())
-        articles.append(
-            Article(
-                id=f"A{block['number']}",
-                title=block["title"],
-                level=block["level"],
-                rule=rule,
-                reference=reference,
-                rationale=rationale,
-                body_words=body_words,
-            )
-        )
-
+    state = _ParseState()
     for line in body.splitlines():
-        if line.startswith("## Article"):
-            match = _HEADER_RE.match(line)
-            if not match:
-                raise ConstitutionError(f"malformed article header: {line!r}")
-            if current is not None:
-                _commit(current)
-            current = {
-                "number": int(match.group(1)),
-                "title": match.group(2).strip(),
-                "level": match.group(3),
-                "rule": "",
-                "reference": "",
-                "rationale": "",
-            }
-            continue
-        if current is None:
-            continue
-        field_match = _FIELD_RE.match(line)
-        if field_match:
-            key = field_match.group(1).lower()
-            if key in {"rule", "reference", "rationale"}:
-                current[key] = field_match.group(2).strip()
-
-    if current is not None:
-        _commit(current)
+        _consume_line(line, state, articles)
+    if state.current is not None:
+        articles.append(_block_to_article(state.current))
     return articles
+
+
+@dataclass
+class _ParseState:
+    """Mutable per-article scratchpad used by ``_consume_line``."""
+
+    current: dict[str, Any] | None = None
+    active_field: str | None = None
+
+
+def _block_to_article(block: dict[str, Any]) -> Article:
+    rule = block.get("rule", "").strip()
+    reference = block.get("reference", "").strip() or None
+    rationale = block.get("rationale", "").strip() or None
+    # Score uses rule + reference; body_words mirrors that so the cap
+    # denominator and the relevance score share their input. Rationale is
+    # carried for surfacing but does not push articles over the cap.
+    body_words = len((rule + " " + (reference or "")).split())
+    return Article(
+        id=f"A{block['number']}",
+        title=block["title"],
+        level=block["level"],
+        rule=rule,
+        reference=reference,
+        rationale=rationale,
+        body_words=body_words,
+    )
+
+
+def _consume_line(line: str, state: _ParseState, articles: list[Article]) -> None:
+    """Apply one body line to the running parse state.
+
+    Handles three cases per spec D-9:
+        1. Article header — closes the prior article and starts a new one.
+        2. Field marker (``**Rule:** ...``) — opens a field; same-line tail
+           seeds the value.
+        3. Continuation — accumulates onto the active field; blank line
+           closes the field so stray paragraphs cannot bleed into Rule.
+    """
+    if line.startswith("## Article"):
+        match = _HEADER_RE.match(line)
+        if not match:
+            raise ConstitutionError(f"malformed article header: {line!r}")
+        if state.current is not None:
+            articles.append(_block_to_article(state.current))
+        state.current = {
+            "number": int(match.group(1)),
+            "title": match.group(2).strip(),
+            "level": match.group(3),
+            "rule": "",
+            "reference": "",
+            "rationale": "",
+            "exception": "",
+        }
+        state.active_field = None
+        return
+    if state.current is None:
+        return
+    field_match = _FIELD_RE.match(line)
+    if field_match:
+        key = field_match.group(1).lower()
+        state.active_field = key
+        if key in _FIELD_KEYS:
+            state.current[key] = field_match.group(2).strip()
+        return
+    if state.active_field not in _FIELD_KEYS:
+        return
+    stripped = line.strip()
+    if not stripped:
+        state.active_field = None
+        return
+    existing = state.current[state.active_field]
+    state.current[state.active_field] = f"{existing} {stripped}".strip() if existing else stripped
 
 
 STOPWORDS: frozenset[str] = frozenset(
@@ -222,28 +256,42 @@ def tokenize(text: str) -> set[str]:
 
 def _read_pyproject_top_level_deps(path: Path) -> list[str]:
     # PEP 621 [project.dependencies] entries as raw strings; missing/malformed -> [].
+    # Defensive against malformed TOML shapes too: a top-level `project = "bad"`
+    # parses fine but is not a table, and the preflight loader runs on every
+    # phase invocation — a crash here would block the whole pipeline.
     if not path.exists():
         return []
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, OSError):
         return []
-    project = data.get("project", {})
+    # tomllib.loads guarantees a dict at the top level, so we only guard
+    # nested shapes — `project = "bad"` parses but is not a table.
+    project = data.get("project")
+    if not isinstance(project, dict):
+        return []
     deps = project.get("dependencies", [])
     return list(deps) if isinstance(deps, list) else []
 
 
 def _read_package_json_top_level_deps(path: Path) -> list[str]:
     # package.json dependency keys (deps + devDeps); missing/malformed -> [].
+    # Each section may legally be absent OR present-but-not-a-dict (a hand-written
+    # package.json with `"dependencies": ["req"]` parses but `.keys()` would
+    # blow up). Guard the shape per section so a malformed file degrades to [].
     if not path.exists():
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
+    if not isinstance(data, dict):
+        return []
     out: list[str] = []
     for section in ("dependencies", "devDependencies"):
-        out.extend((data.get(section) or {}).keys())
+        section_dict = data.get(section)
+        if isinstance(section_dict, dict):
+            out.extend(section_dict.keys())
     return out
 
 
@@ -373,6 +421,20 @@ def filter_articles(
             else:
                 dropped.append(article.id)
         kept = sorted(kept_after_cap, key=lambda a: int(a.id[1:]))
+
+    # CRITICAL articles are exempt from the cap step above so a malformed
+    # Constitution can drive the kept set past MAX_INJECTED_WORDS on the back
+    # of CRITICAL bodies alone. Refuse rather than silently inject an
+    # over-budget articles[] (D-9 promises ≤1500-token injection); the author
+    # must trim Rule bodies, demote articles to SHOULD, or split.
+    final_total = sum(a.body_words for a in kept)
+    if final_total > MAX_INJECTED_WORDS:
+        critical_ids = [a.id for a in kept if a.level == "CRITICAL"]
+        raise ConstitutionError(
+            f"CRITICAL articles {critical_ids} exceed the {MAX_INJECTED_WORDS}-word "
+            f"injection budget on their own ({final_total} words). Trim Rule bodies, "
+            f"demote some to SHOULD, or split the articles."
+        )
     return kept, sorted(set(dropped), key=lambda x: int(x[1:]))
 
 

@@ -131,6 +131,69 @@ def test_article_to_budget_dict_returns_locked_shape() -> None:
     assert "body_words" not in payload
 
 
+def test_filter_articles_raises_when_critical_alone_exceeds_cap(tmp_path: Path) -> None:
+    """CRITICAL articles are exempt from the percentile/cap filters, but the
+    1500-token injection budget is the contract D-9 promises. A Constitution
+    whose CRITICAL articles alone exceed the cap MUST surface a hard error
+    rather than silently inject an over-budget articles[]."""
+    bloat_word = " word"  # leading space → split() yields one token per occurrence
+    big_rule = "Always vault" + bloat_word * 1300
+    text = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-07"\n---\n\n'
+        "# Constitution\n\n"
+        "## Article 1 — Big critical [CRITICAL]\n"
+        f"**Rule:** {big_rule}\n"
+        "**Reference:** ref\n"
+        "**Rationale:** rationale\n"
+        "**Exception:** None.\n"
+    )
+    bad = tmp_path / "over_critical.md"
+    bad.write_text(text, encoding="utf-8")
+    articles = cn.parse_constitution(bad)
+    assert articles[0].body_words > cn.MAX_INJECTED_WORDS, "fixture must over-shoot the cap"
+    with pytest.raises(cn.ConstitutionError, match=r"CRITICAL articles .* exceed"):
+        cn.filter_articles(articles, scope_keywords={"vault"})
+
+
+def test_parse_constitution_concatenates_multi_line_rule_body(tmp_path: Path) -> None:
+    """A Rule field that wraps onto continuation lines must round-trip into a
+    single rule string so scoring and body_words capture the entire rule."""
+    text = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-07"\n---\n\n'
+        "## Article 1 — Multi-line rule [SHOULD]\n"
+        "**Rule:** First line of the rule.\n"
+        "Second line continues the same rule with more detail.\n"
+        "Third line keeps going.\n"
+        "**Reference:** ref-x\n"
+        "**Rationale:** rationale-y\n"
+        "**Exception:** None.\n"
+    )
+    src = tmp_path / "multiline.md"
+    src.write_text(text, encoding="utf-8")
+    article = cn.parse_constitution(src)[0]
+    assert "First line" in article.rule
+    assert "Second line continues" in article.rule
+    assert "Third line keeps going" in article.rule
+    assert article.reference == "ref-x"
+    assert article.rationale == "rationale-y"
+
+
+def test_read_pyproject_top_level_deps_handles_malformed_project(tmp_path: Path) -> None:
+    """`project = "bad"` parses as TOML but is not a table; preflight must not
+    crash, otherwise every phase invocation in such a repo blocks."""
+    bad = tmp_path / "pyproject.toml"
+    bad.write_text('project = "bad"\n', encoding="utf-8")
+    assert cn._read_pyproject_top_level_deps(bad) == []
+
+
+def test_read_package_json_top_level_deps_handles_malformed_dep_section(tmp_path: Path) -> None:
+    """A hand-written `package.json` may declare `"dependencies": [...]` (a
+    list, not an object). The reader must degrade to [] rather than crash."""
+    bad = tmp_path / "package.json"
+    bad.write_text('{"dependencies": ["req-list"]}', encoding="utf-8")
+    assert cn._read_package_json_top_level_deps(bad) == []
+
+
 def test_article_to_budget_dict_preserves_null_optionals() -> None:
     """Articles without Reference/Rationale serialize them as None, not omitted."""
     text = (

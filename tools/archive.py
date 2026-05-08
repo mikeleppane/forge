@@ -512,6 +512,60 @@ def ship_feature(
 _PROPOSAL_FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 
 
+def _mark_change_merged_hook(proposal_path: Path) -> Callable[[Path], None]:
+    """Return a closure that flips proposal.md ``status: approved`` -> ``merged``.
+
+    Designed for ``merge_delta_proposal(pre_archive_hook=...)``.  The closure
+    captures ``proposal_path`` from its lexical scope; the ``change_folder``
+    argument passed by merge_delta_proposal is intentionally ignored because
+    the proposal path is already known from the factory argument.
+
+    Idempotency: if ``status`` is already ``merged``, the closure is a no-op
+    (does NOT raise).  This matches the retry-safe pattern used by
+    ``make_acknowledgement_hook`` in ``tools.ship_gate``.
+
+    Status guard: raises ``ArchiveError`` when the current status is anything
+    other than ``approved`` or ``merged``.  ``merge_delta_proposal``'s
+    preflight already enforces ``approved``; this guard is a defensive layer
+    for buggy or malicious retries that call the hook with an unexpected
+    status.
+
+    Args:
+        proposal_path: Path to the live ``proposal.md``.
+
+    Returns:
+        Callable matching ``Callable[[Path], None]`` for ``merge_delta_proposal``.
+
+    Raises:
+        ArchiveError: When the factory is called with a non-existent path (via
+            the inner ``_read_proposal_frontmatter`` call), or when the closure
+            is invoked and the current status is not ``approved`` or ``merged``.
+    """
+
+    def _flip_to_merged(
+        change_folder: Path,  # noqa: ARG001 — received from merge_delta_proposal; path is captured
+    ) -> None:
+        fm = _read_proposal_frontmatter(proposal_path)
+        status = fm.get("status")
+        if status == "merged":
+            return
+        if status != "approved":
+            raise ArchiveError(f"proposal status is {status!r}; expected approved or merged")
+        fm["status"] = "merged"
+        # Re-emit frontmatter + original body content below the delimiter.
+        text = proposal_path.read_text(encoding="utf-8")
+        body_after_fm = re.sub(r"^---\r?\n.*?\r?\n---\r?\n", "", text, count=1, flags=re.DOTALL)
+        new_text = (
+            "---\n"
+            + yaml.safe_dump(fm, default_flow_style=False, allow_unicode=True)
+            + "---\n"
+            + body_after_fm
+        )
+        atomic_replace(proposal_path, new_text)
+
+    return _flip_to_merged
+
+
 def _read_proposal_frontmatter(proposal_path: Path) -> dict[str, object]:
     """Parse and return proposal.md YAML frontmatter as a dict.
 

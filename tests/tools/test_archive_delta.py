@@ -33,7 +33,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tools.archive import ArchiveError, merge_delta_proposal
+from tools.archive import ArchiveError, _mark_change_merged_hook, merge_delta_proposal
 from tools.validate._finding import Finding
 from tools.validate.spec_structural import (
     validate_capability_spec_sections,
@@ -625,3 +625,105 @@ def test_proposal_non_mapping_yaml_frontmatter_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ArchiveError, match="frontmatter must be a YAML mapping"):
         merge_delta_proposal(tmp_path, change_id, "my-cap")
+
+
+# ---------------------------------------------------------------------------
+# _mark_change_merged_hook
+# ---------------------------------------------------------------------------
+
+_APPROVED_PROPOSAL = """\
+---
+id: 2026-05-08-add-criterion
+affects_capability: my-cap
+status: approved
+created: "2026-05-08"
+extra_field: preserved
+---
+
+## Affects
+
+sections [Acceptance Criteria]
+
+## Delta
+
++ ADD: criterion-3
+  criterion 3: the system does Z
+"""
+
+_MERGED_PROPOSAL = """\
+---
+id: 2026-05-08-add-criterion
+affects_capability: my-cap
+status: merged
+created: "2026-05-08"
+extra_field: preserved
+---
+
+## Affects
+
+sections [Acceptance Criteria]
+
+## Delta
+
++ ADD: criterion-3
+  criterion 3: the system does Z
+"""
+
+
+def test_mark_change_merged_hook_flips_status_approved_to_merged(tmp_path: Path) -> None:
+    """Hook flips status: approved -> merged; other frontmatter fields preserved."""
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(_APPROVED_PROPOSAL, encoding="utf-8")
+
+    hook = _mark_change_merged_hook(proposal)
+    hook(tmp_path)  # change_folder arg is ignored; proposal_path already captured
+
+    result = proposal.read_text(encoding="utf-8")
+    assert "status: merged" in result
+    assert "status: approved" not in result
+    # Other frontmatter fields must be preserved
+    assert "extra_field: preserved" in result
+    assert "affects_capability: my-cap" in result
+
+
+def test_mark_change_merged_hook_idempotent_on_already_merged(tmp_path: Path) -> None:
+    """Hook is a no-op when status is already merged; second call does not raise."""
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(_MERGED_PROPOSAL, encoding="utf-8")
+
+    hook = _mark_change_merged_hook(proposal)
+    # First call
+    hook(tmp_path)
+    # Second call — must not raise
+    hook(tmp_path)
+
+    result = proposal.read_text(encoding="utf-8")
+    assert "status: merged" in result
+    assert "status: approved" not in result
+
+
+def test_mark_change_merged_hook_rejects_unexpected_status(tmp_path: Path) -> None:
+    """Hook raises ArchiveError when proposal status is neither approved nor merged."""
+    draft_proposal = """\
+---
+id: 2026-05-08-add-criterion
+affects_capability: my-cap
+status: draft
+created: "2026-05-08"
+---
+
+## Affects
+
+sections [Intent]
+
+## Delta
+
++ ADD: something
+  something new
+"""
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(draft_proposal, encoding="utf-8")
+
+    hook = _mark_change_merged_hook(proposal)
+    with pytest.raises(ArchiveError, match="expected approved or merged"):
+        hook(tmp_path)

@@ -19,6 +19,24 @@ from ._frontmatter import (
 _NR_PHRASE = re.compile(r"\b(SHALL NOT|MUST NOT)\b")
 _NR_SECTION = re.compile(r"^# Negative Requirements\s*$", re.MULTILINE)
 
+_CAPABILITY_SPEC_REQUIRED_SECTIONS: frozenset[str] = frozenset(
+    {
+        "Intent",
+        "Scope",
+        "Domain",
+        "Scenarios",
+        "Acceptance Criteria",
+        "Negative Requirements",
+        "Decisions",
+    }
+)
+
+_CAPABILITY_SPEC_SECTION_RE = re.compile(
+    r"^## (Intent|Scope|Domain|Scenarios|Acceptance Criteria"
+    r"|Negative Requirements|Decisions)\s*$",
+    re.MULTILINE,
+)
+
 
 def validate_negative_requirements(path: Path) -> list[Finding]:
     """Validate `# Negative Requirements` placement per M3 spec §7.1 NR rules.
@@ -85,6 +103,41 @@ def validate_negative_requirements(path: Path) -> list[Finding]:
                 ),
             )
 
+    return findings
+
+
+def validate_capability_spec_sections(path: Path) -> list[Finding]:
+    """Validate that all 7 required H2 sections are present in a capability SPEC.
+
+    Checks that each section in `_CAPABILITY_SPEC_REQUIRED_SECTIONS` appears as
+    an exact H2 header (``## <Name>``) at column 0.  Order is not enforced; only
+    presence.  One BLOCK finding is emitted per missing section.
+
+    Args:
+        path: Path to the capability SPEC.md file.
+
+    Returns:
+        List of Finding records.  Empty list means all required sections present.
+    """
+    findings: list[Finding] = []
+    text = _read_text(path)
+    if text is None:
+        findings.append(
+            Finding("BLOCK", "spec", path, f"file not found: {path}"),
+        )
+        return findings
+
+    present = frozenset(_CAPABILITY_SPEC_SECTION_RE.findall(text))
+    missing = _CAPABILITY_SPEC_REQUIRED_SECTIONS - present
+    findings.extend(
+        Finding(
+            "BLOCK",
+            "spec",
+            path,
+            f"missing required '## {name}' section",
+        )
+        for name in sorted(missing)
+    )
     return findings
 
 

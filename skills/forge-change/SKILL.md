@@ -30,6 +30,20 @@ argument), or `/forge:spec` routed here after detecting a capability collision.
    `change_id = f"{today}-{tools.archive.slug_from_idea(change_description)}"`.
    Print the computed id and confirm with the user before proceeding.
 
+2a. **Collision guard (REQUIRED before seeding).**
+    Same-day duplicate descriptions derive the same `change_id`; without a
+    guard a model following this skill can overwrite an in-progress
+    proposal.  Before writing anything, check both:
+    - `.forge/changes/<change_id>/` — an in-progress proposal at the same id.
+    - `.forge/changes/archive/<change_id>/` — an already-merged change at the
+      same id.
+
+    If either exists, do NOT seed.  Prompt the user: "change id `<change_id>`
+    already exists at `<path>`. Provide a disambiguating suffix (e.g.,
+    `-v2`, `-bulk`) or abort." On a suffix, recompute the id and re-run the
+    collision check; abort on persistent collision.  Only proceed to step 3
+    once both paths are clear.
+
 3. **Seed proposal.md.**
    Create `.forge/changes/<change_id>/` and copy
    `templates/changes/proposal.md` into `proposal.md`.  Substitute the

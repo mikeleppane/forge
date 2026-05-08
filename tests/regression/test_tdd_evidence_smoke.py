@@ -28,15 +28,24 @@ PAIRED_FIXTURE_ID = "2026-05-08-tdd-paired-feature"
 MISSING_FIXTURE_ID = "2026-05-08-tdd-missing-feature"
 
 
-def _fake_git_show_files(sha: str) -> list[str]:
-    """Return tests/ paths for any test-prefix SHA, src/ paths otherwise.
+_TEST_SHAS: frozenset[str] = frozenset(
+    {
+        "a1a2b3c",  # paired AC-1 test
+        "a2a2b3c",  # paired AC-2 test
+    }
+)
 
-    The paired fixture uses SHAs prefixed ``t`` for test commits and ``f``
-    for feat commits. Returning a tests/-only path for ``t*`` SHAs keeps
-    the suspicious-test-commit advisory silent; returning ``src/`` for
-    ``f*`` SHAs is irrelevant because feat commits are not inspected.
+
+def _fake_git_show_files(sha: str) -> list[str]:
+    """Return tests/ paths for known test-commit SHAs, src/ paths otherwise.
+
+    The validator inspects diffs only for commits classified as ``test``
+    (by Conventional Commit prefix) or ``refactor``. Returning a
+    tests/-only path for known test-commit SHAs keeps the
+    suspicious-test-commit advisory silent. Other SHAs return ``src/``
+    paths, which the validator does not inspect for feat commits.
     """
-    if sha.startswith("t"):
+    if sha in _TEST_SHAS:
         return ["tests/foo.py"]
     return ["src/foo.py"]
 

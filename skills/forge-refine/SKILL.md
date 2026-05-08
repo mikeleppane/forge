@@ -26,7 +26,11 @@ directly against an active feature whose `current_phase` is already `refine`.
 1. **Resolve feature.** Read `--feature <id>` or apply the single-active rule.
    Locate `.forge/features/<id>/state.json`.
 2. **Guard phase.** Read state.json; require `current_phase == "refine"`.
-   Otherwise abort with `StateError("refine phase already complete or skipped")`.
+   Otherwise abort with the `StateError` raised by
+   `tools.state.increment_refine_attempts` itself — message format:
+   `"cannot increment refine_attempts: current_phase is '<X>', expected 'refine'"`.
+   Do not invent a custom abort string; the helper is the single source of
+   truth so users see consistent errors across phases.
 3. **Read seeded idea.** Pull `state.json.routing.idea`. Abort if missing —
    instruct the user to run `/forge:do --full <idea>` first so routing is seeded.
 4. **Detect ambiguity.** Scan the idea for vague verbs ("improve", "better",

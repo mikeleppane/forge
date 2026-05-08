@@ -315,6 +315,52 @@ def record_refined_idea(
     return payload
 
 
+def increment_refine_attempts(
+    path: Path,
+    schema_path: Path | None = None,
+) -> int:
+    """Increment ``routing.refine_attempts`` by 1; persist and return the new count.
+
+    The routing block must already exist (seeded by ``/forge:do`` via
+    ``record_routing_decision``). When ``refine_attempts`` is missing from the
+    routing block, it is treated as 0 and seeded to 1 on the first call.
+    Sibling routing fields are preserved.
+
+    Args:
+        path: state.json path.
+        schema_path: Optional schema for read+write validation.
+
+    Returns:
+        The new ``refine_attempts`` count after increment.
+
+    Raises:
+        StateError: ``current_phase`` is not ``refine``, the routing block is
+            absent (call ``/forge:do`` first), or schema validation fails.
+    """
+    payload = read_state(path, schema_path=schema_path)
+
+    current_phase = payload.get("current_phase")
+    if current_phase != "refine":
+        raise StateError(
+            f"cannot increment refine_attempts: current_phase is "
+            f"{current_phase!r}, expected 'refine'"
+        )
+
+    routing = payload.get("routing")
+    if not isinstance(routing, dict):
+        raise StateError(
+            "cannot increment refine_attempts: routing block missing — "
+            "/forge:do must run before /forge:refine"
+        )
+
+    current = routing.get("refine_attempts", 0)
+    new_count = int(current) + 1
+    routing["refine_attempts"] = new_count
+
+    write_state(path, payload, schema_path=schema_path)
+    return new_count
+
+
 def set_review_target(
     path: Path,
     *,

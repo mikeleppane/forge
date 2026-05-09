@@ -15,6 +15,9 @@ Print one line summarizing the active feature's lifecycle position. Read-only.
 - Active feature folder (resolved via `tools.state.find_active_feature(repo_root, feature_id)`).
 - `--feature <id>` flag: override active-feature resolution.
 - `--verbose` flag: print phase history table after the summary.
+- `--report` flag: print a structured markdown report (current phase, last
+  ≤5 commits, open BLOCK findings, recommended next command) instead of
+  the one-line summary. Mutually exclusive with `--verbose`.
 
 ## Steps
 
@@ -36,6 +39,12 @@ Print one line summarizing the active feature's lifecycle position. Read-only.
    - **Timestamps:** render `started_at` and `completed_at` as the literal RFC 3339 strings stored in `state.json` (no reformatting). When a field is absent, render the literal string `none`.
    - **Skipped phases:** entries from `state.json.skipped[]` render as a row with `Status` = `skipped` and the `reason` text appended in parentheses: `skipped (M3 deferred — manual research acceptable)`. Started/Completed columns render `none` for skipped rows.
    - **Empty table:** if no phases match (newly-seeded feature, `phases == {}` and `skipped == []`), print only the header + separator rows; do not print "(no phases yet)" or any other placeholder.
+7. **`--report` mode (structured output).** When `--report` is set:
+   - Run `python -m tools.validate --target all --repo-root <repo_root>` to gather findings; capture stdout, parse as JSON. Reconstruct `Finding` objects from the JSON `findings[]` entries (`severity`, `target`, `file`, `message`, optional `fix_hint`).
+   - Call `tools.status_report.build_status_report(state_payload, findings, feature_id=<id>)`.
+   - Print the result of `tools.status_report.render_status_report(report)`.
+   - Skip the one-line summary in this mode (replaced by the structured report).
+   - `--verbose` and `--report` are mutually exclusive; if both are passed, abort with the literal error `"--report and --verbose cannot be combined"`.
 
 ## Done
 

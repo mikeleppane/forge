@@ -76,7 +76,12 @@ def test_build_status_report_defaults_flow_version_when_absent() -> None:
 def test_build_status_report_recent_commits_sorted_desc() -> None:
     """When >5 commits exist, the report keeps the 5 most-recent (desc by logged_at)."""
     commits = [
-        {"sha": f"abc{i:04d}deadbeef", "phase": "execute", "subject": f"step {i}", "logged_at": f"2026-05-0{i}T10:00:00Z"}
+        {
+            "sha": f"abc{i:04d}deadbeef",
+            "phase": "execute",
+            "subject": f"step {i}",
+            "logged_at": f"2026-05-0{i}T10:00:00Z",
+        }
         for i in range(1, 8)
     ]
     payload = _payload(commits=commits)
@@ -192,7 +197,12 @@ def test_render_status_report_section_order_stable() -> None:
 def test_render_status_report_5_commit_cap() -> None:
     """7 commits in payload → exactly 5 data rows (plus header + separator) in markdown."""
     commits = [
-        {"sha": f"abc{i:04d}deadbeef", "phase": "execute", "subject": f"step {i}", "logged_at": f"2026-05-0{i}T10:00:00Z"}
+        {
+            "sha": f"abc{i:04d}deadbeef",
+            "phase": "execute",
+            "subject": f"step {i}",
+            "logged_at": f"2026-05-0{i}T10:00:00Z",
+        }
         for i in range(1, 8)
     ]
     payload = _payload(commits=commits)
@@ -201,7 +211,9 @@ def test_render_status_report_5_commit_cap() -> None:
     rendered = render_status_report(report)
 
     # Count data rows by counting "step N" occurrences in the body.
-    step_lines = [line for line in rendered.splitlines() if line.startswith("| step ") or "| step " in line]
+    step_lines = [
+        line for line in rendered.splitlines() if line.startswith("| step ") or "| step " in line
+    ]
     # Each rendered table row begins with `|` and contains the subject; just
     # count distinct subjects rendered.
     matched_subjects = [s for s in (f"step {i}" for i in range(1, 8)) if s in rendered]
@@ -237,14 +249,15 @@ def test_render_status_report_pipe_safe_subjects() -> None:
     assert sha_rows, "expected a rendered row for the commit"
     data_row = sha_rows[0]
     # 3-column table ⇒ 4 unescaped pipes (leading, between cols, trailing).
-    # Count outer-pipe boundaries by splitting on the literal escape we emit
-    # (`\|`) first to avoid counting escaped pipes as separators.
-    parts = data_row.split(r"\|")
-    rejoined = "|ESC|".join(parts)
-    boundary_pipes = rejoined.count("|") - rejoined.count("|ESC|")
+    # Replace escaped `\|` with a placeholder so we only count column-boundary
+    # pipes when measuring the row.
+    masked = data_row.replace(r"\|", "<ESC>")
+    boundary_pipes = masked.count("|")
     assert boundary_pipes == 4, (
         f"expected exactly 4 column-boundary pipes after escaping, got {boundary_pipes}: {data_row!r}"
     )
+    # Sanity: the original subject pipes really were escaped.
+    assert r"\|" in data_row
 
 
 def test_render_status_report_next_command_renders_when_present() -> None:
@@ -283,9 +296,7 @@ def test_build_status_report_handles_missing_phase_block() -> None:
         ("full", "domain", "/forge:scenarios"),
     ],
 )
-def test_build_status_report_next_command_other_tiers(
-    tier: str, phase: str, expected: str
-) -> None:
+def test_build_status_report_next_command_other_tiers(tier: str, phase: str, expected: str) -> None:
     payload = _payload(tier=tier, current_phase=phase)
 
     report = build_status_report(payload, [], feature_id="2026-05-09-demo")

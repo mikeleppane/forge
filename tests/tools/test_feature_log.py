@@ -190,6 +190,76 @@ def test_append_event_no_network_calls(tmp_path: Path, monkeypatch: pytest.Monke
     assert target.is_file()
 
 
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "../../escape",
+        "..",
+        "2026-05-08-foo/../../etc",
+        "2026-05-08-foo\x00",
+        "abs/path",
+        "",
+    ],
+)
+def test_log_path_rejects_traversal_feature_ids(tmp_path: Path, bad_id: str) -> None:
+    """``feature_id`` is a trusted path segment — non-conforming ids must
+    raise before any path math runs."""
+    with pytest.raises(FeatureLogError, match="feature_id"):
+        log_path(tmp_path, bad_id)
+
+
+def test_read_events_rejects_traversal_feature_id(tmp_path: Path) -> None:
+    """``read_events`` must validate ``feature_id`` before path construction
+    so an attacker-controlled id cannot walk out of ``.forge/logs/``."""
+    with pytest.raises(FeatureLogError, match="feature_id"):
+        read_events(tmp_path, "../../escape")
+
+
+def test_read_events_rejects_corrupted_event_payload(tmp_path: Path) -> None:
+    """A JSONL line that round-trips into a Finding with bad event_type
+    must raise — read_events re-validates reconstructed events."""
+    target = log_path(tmp_path, "2026-05-08-foo")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Bypass the writer's validator by writing the JSONL directly with a
+    # bogus event_type. read_events must reject it.
+    target.write_text(
+        json.dumps(
+            {
+                "feature_id": "2026-05-08-foo",
+                "event_type": "frobnicated",
+                "timestamp": "2026-05-08T12:00:00Z",
+                "payload": {"phase": "spec"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FeatureLogError, match="line 1"):
+        read_events(tmp_path, "2026-05-08-foo")
+
+
+def test_read_events_rejects_corrupted_payload_type(tmp_path: Path) -> None:
+    """A JSONL line with ``payload`` that is not a dict must raise."""
+    target = log_path(tmp_path, "2026-05-08-foo")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "feature_id": "2026-05-08-foo",
+                "event_type": "phase_started",
+                "timestamp": "2026-05-08T12:00:00Z",
+                "payload": ["not", "a", "dict"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FeatureLogError, match="line 1"):
+        read_events(tmp_path, "2026-05-08-foo")
+
+
 def test_append_event_round_trips_unicode_payload(tmp_path: Path) -> None:
     payload: dict[str, object] = {"summary": "résumé naïve — 日本語 🚀"}
     append_event(

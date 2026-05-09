@@ -76,10 +76,23 @@ class FeatureLogEvent:
     payload: dict[str, Any]
 
 
+def _validate_feature_id(feature_id: str) -> None:
+    """Reject feature ids that would escape ``.forge/logs/`` via path traversal.
+
+    Both :func:`append_event` and :func:`read_events` rely on ``feature_id``
+    as a trusted path segment. Validating it before any path math is the
+    cheapest defense against ``../../../etc/passwd``-style payloads.
+    """
+    if not isinstance(feature_id, str) or not _FEATURE_ID_RE.fullmatch(feature_id):
+        raise FeatureLogError(f"invalid feature_id {feature_id!r}; must match YYYY-MM-DD-slug")
+
+
 def log_path(repo_root: Path, feature_id: str) -> Path:
     """Return the canonical log path for ``feature_id`` under ``repo_root``.
 
-    Pure function — does not touch the filesystem.
+    Pure function — does not touch the filesystem. The ``feature_id`` is
+    validated against the canonical regex before path construction so an
+    attacker-controlled id cannot traverse outside ``.forge/logs/``.
 
     Args:
         repo_root: Repository root containing the ``.forge/`` tree.
@@ -87,15 +100,17 @@ def log_path(repo_root: Path, feature_id: str) -> Path:
 
     Returns:
         Path to ``<repo_root>/.forge/logs/<feature_id>.jsonl``.
+
+    Raises:
+        FeatureLogError: When ``feature_id`` does not match the canonical
+            ``YYYY-MM-DD-slug`` regex.
     """
+    _validate_feature_id(feature_id)
     return repo_root / ".forge" / "logs" / f"{feature_id}.jsonl"
 
 
 def _validate_event(event: FeatureLogEvent) -> None:
-    if not isinstance(event.feature_id, str) or not _FEATURE_ID_RE.fullmatch(event.feature_id):
-        raise FeatureLogError(
-            f"invalid feature_id {event.feature_id!r}; must match YYYY-MM-DD-slug"
-        )
+    _validate_feature_id(event.feature_id)
 
     if event.event_type not in _VALID_EVENT_TYPES:
         raise FeatureLogError(
@@ -192,16 +207,19 @@ def read_events(repo_root: Path, feature_id: str) -> list[FeatureLogEvent]:
         if not isinstance(data, dict):
             raise FeatureLogError(f"malformed log entry at line {index}: expected JSON object")
         try:
-            events.append(
-                FeatureLogEvent(
-                    feature_id=data["feature_id"],
-                    event_type=data["event_type"],
-                    timestamp=data["timestamp"],
-                    payload=data["payload"],
-                )
+            event = FeatureLogEvent(
+                feature_id=data["feature_id"],
+                event_type=data["event_type"],
+                timestamp=data["timestamp"],
+                payload=data["payload"],
             )
         except KeyError as exc:
             raise FeatureLogError(
                 f"malformed log entry at line {index}: missing field {exc.args[0]!r}"
             ) from exc
+        try:
+            _validate_event(event)
+        except FeatureLogError as exc:
+            raise FeatureLogError(f"malformed log entry at line {index}: {exc}") from exc
+        events.append(event)
     return events

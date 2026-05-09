@@ -13,6 +13,7 @@ import re
 import shutil
 import sys
 import tempfile
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,7 +128,13 @@ def slug_from_idea(text: str, *, max_words: int = 5) -> str:
     """
     if max_words < 1:
         raise ValueError(f"max_words must be >= 1, got {max_words}")
-    lowered = text.lower()
+    # M8: normalize via NFKD + ascii-ignore so accented Latin (``café`` ->
+    # ``cafe``) and German umlauts (``über`` -> ``uber``) collapse to their
+    # base form before the existing ``[^a-z0-9 ]`` cleanup. Non-decomposable
+    # characters (CJK, Devanagari, etc.) are stripped entirely; the existing
+    # "all tokens filtered" empty-slug path catches that case downstream.
+    normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    lowered = normalized.lower()
     cleaned = _SLUG_CLEANUP_RE.sub(" ", lowered)
     tokens = cleaned.split()
     # Drop stopwords and tokens that are too short (length < _SLUG_MIN_TOKEN_LEN)

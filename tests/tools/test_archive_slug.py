@@ -20,16 +20,25 @@ def test_slug_from_idea_ascii_happy_path() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_slug_from_idea_umlaut_input_is_deterministic() -> None:
-    # Non-ASCII characters (ö, ü, ä, ß) are stripped; surviving ASCII
-    # fragments form the slug: "gr" from "größe", "ufer" from "käufer".
-    # "für" contributes only 1-char fragments ("f", "r") that are dropped.
-    result = slug_from_idea("Größe für Käufer")
-    assert result == "gr-ufer"
+def test_slug_from_idea_umlaut_input_normalizes_via_nfkd() -> None:
+    # M8: Unicode normalization via NFKD + ascii-ignore preserves the
+    # non-English speller's intent. ``ö → o`` (NFKD decomposes to o +
+    # combining diaeresis, the diaeresis is stripped). ``ß`` does not
+    # decompose under NFKD and is dropped entirely so "Größe" → "grosse"
+    # but "größe" stays at "grosse" (the trailing ß is dropped); use
+    # the umlaut-only test to assert the diaeresis path.
+    assert slug_from_idea("Über Käufer") == "uber-kaufer"
+
+
+def test_slug_from_idea_accented_latin_normalizes_to_ascii() -> None:
+    # M8: accented Latin survives NFKD: ``café`` → ``cafe``.
+    assert slug_from_idea("café au lait") == "cafe-au-lait"
 
 
 def test_slug_from_idea_cjk_input_raises_archive_error() -> None:
-    # All CJK characters are outside [a-z0-9 ], stripped entirely; empty slug.
+    # M8: NFKD of CJK characters does not decompose them to ASCII so
+    # they remain stripped by the existing ``[^a-z0-9 ]`` cleanup. Empty
+    # slug still raises the empty-error path.
     with pytest.raises(ArchiveError) as exc_info:
         slug_from_idea("日本語入力")
     assert "日本語入力" in str(exc_info.value)

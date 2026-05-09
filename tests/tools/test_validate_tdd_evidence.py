@@ -520,6 +520,40 @@ def test_tdd_evidence_orphan_commit_blocks(tmp_path: Path) -> None:
     ]
 
 
+def test_tdd_evidence_orphan_full_sha_fix_hint_under_cap(tmp_path: Path) -> None:
+    """A full 40-char SHA in commits[] must not push fix_hint past MAX_FIX_HINT_LEN.
+
+    Regression: the orphan_commit_no_slice fix_hint embedded the SHA verbatim;
+    a real-world 40-char git SHA pushed the hint past the 140-char cap and
+    triggered a ValidationError when the Finding was constructed.
+    """
+    feature_dir = _make_feature(tmp_path)
+    _write_spec(feature_dir, ac_count=1)
+    full_sha = "0123456789abcdef0123456789abcdef01234567"
+    _write_state(
+        feature_dir,
+        [
+            {
+                "sha": full_sha,
+                "phase": "execute",
+                "subject": "feat(validate): orphaned commit with full sha",
+                "logged_at": "2026-05-08T10:00:00Z",
+            },
+        ],
+    )
+    _write_slice(feature_dir, 1, {"AC-1": ["unrelated"]})
+
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=_no_files)
+
+    orphans = [f for f in findings if "orphan_commit_no_slice" in f.message]
+    assert orphans, "expected orphan_commit_no_slice finding for unreferenced full-SHA commit"
+    for finding in orphans:
+        assert finding.fix_hint is not None
+        assert len(finding.fix_hint) <= MAX_FIX_HINT_LEN, (
+            f"fix_hint length {len(finding.fix_hint)} exceeds cap: {finding.fix_hint!r}"
+        )
+
+
 def test_tdd_evidence_findings_sorted_deterministically(tmp_path: Path) -> None:
     """Findings sort by (severity_rank, code, ac_id) so output is stable."""
     feature_dir = _make_feature(tmp_path)

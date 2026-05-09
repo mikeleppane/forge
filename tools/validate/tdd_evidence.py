@@ -474,6 +474,7 @@ def _orphan_commit_findings(
         sha = commit["sha"]
         if any(_shas_match(d, sha) for d in declared):
             continue
+        short_sha = sha[:7]
         out.append(
             Finding(
                 "BLOCK",
@@ -482,7 +483,7 @@ def _orphan_commit_findings(
                 f"tdd_evidence:orphan_commit_no_slice — execute commit {sha} "
                 f"({commit['subject']!r}) is not referenced by any slice-*.summary",
                 fix_hint=(
-                    f"Add `AC-<n>: {sha}` to the matching slice-*.summary so "
+                    f"Add `AC-<n>: {short_sha}` to the matching slice-*.summary so "
                     f"the gate can map the commit to an acceptance criterion."
                 ),
             )

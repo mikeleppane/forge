@@ -264,6 +264,10 @@ def validate_domain_glossary(repo_root: Path, feature_id: str) -> list[Finding]:
                 TARGET,
                 feature_dir,
                 f"{TARGET}:feature_missing — {feature_dir} does not exist",
+                fix_hint=(
+                    f"Create the feature folder .forge/features/{feature_id}/ "
+                    f"or correct the feature id passed to the validator."
+                ),
             )
         ]
 
@@ -281,6 +285,10 @@ def validate_domain_glossary(repo_root: Path, feature_id: str) -> list[Finding]:
                     TARGET,
                     domain_path,
                     f"{TARGET}:domain_md_missing — full-tier feature is missing DOMAIN.md",
+                    fix_hint=(
+                        "Author DOMAIN.md from templates/feature/DOMAIN.md, or "
+                        "downgrade the feature tier in state.json if it is not full."
+                    ),
                 )
             ]
         return []
@@ -320,6 +328,10 @@ def _classify_rows(
                     domain_path,
                     f"{TARGET}:malformed_glossary_row — row has wrong column count or "
                     f"empty Term cell: {cells!r}",
+                    fix_hint=(
+                        "Fix the DOMAIN.md row to have all four cells "
+                        "(Term | Definition | Context | Invariants)."
+                    ),
                 )
             )
             continue
@@ -331,6 +343,7 @@ def _classify_rows(
                     TARGET,
                     domain_path,
                     f"{TARGET}:malformed_glossary_row — empty Term cell in row {cells!r}",
+                    fix_hint=("Populate the Term cell in the DOMAIN.md row, or delete the row."),
                 )
             )
             continue
@@ -357,6 +370,10 @@ def _duplicate_findings(
             TARGET,
             domain_path,
             f"{TARGET}:duplicate_term — {term!r} appears more than once in the glossary",
+            fix_hint=(
+                f"Remove the duplicate row for {term!r} in DOMAIN.md or merge the "
+                f"definitions into one row."
+            ),
         )
         for term in sorted(duplicates)
     ]
@@ -377,6 +394,10 @@ def _orphan_findings(
             TARGET,
             spec_path,
             f"{TARGET}:orphan_term — SPEC term {term!r} is not defined in DOMAIN.md glossary",
+            fix_hint=(
+                f"Add a glossary row for {term!r} in DOMAIN.md, or rephrase SPEC.md "
+                f"to use a term already defined."
+            ),
         )
         for term in orphans
     ]

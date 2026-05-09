@@ -24,18 +24,27 @@ class Finding:
         target: Which validator produced the finding.
         file: Repo-relative path to the file that triggered the finding.
         message: Human-readable description.
+        fix_hint: Optional, imperative one-liner naming the recovery action
+            (and any disambiguating identifier) so the operator does not need
+            to read the validator source. ``None`` when no concrete hint
+            applies; CLI rendering omits the key in that case so existing
+            JSON fixtures retain their dict shape.
     """
 
     severity: Severity
     target: str
     file: Path
     message: str
+    fix_hint: str | None = None
 
 
 def _finding_to_dict(finding: Finding) -> dict[str, str]:
-    return {
+    payload: dict[str, str] = {
         "severity": finding.severity,
         "target": finding.target,
         "file": str(finding.file),
         "message": finding.message,
     }
+    if finding.fix_hint is not None:
+        payload["fix_hint"] = finding.fix_hint
+    return payload

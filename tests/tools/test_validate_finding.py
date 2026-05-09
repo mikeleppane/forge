@@ -62,9 +62,7 @@ def test_finding_fix_hint_round_trips_through_dict() -> None:
         fix_hint="Author a test commit for AC-1 before the impl commit.",
     )
     payload = _finding_to_dict(finding)
-    assert payload["fix_hint"] == (
-        "Author a test commit for AC-1 before the impl commit."
-    )
+    assert payload["fix_hint"] == ("Author a test commit for AC-1 before the impl commit.")
 
 
 def test_finding_dict_omits_fix_hint_when_none() -> None:

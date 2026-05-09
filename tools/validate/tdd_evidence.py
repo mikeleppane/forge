@@ -222,6 +222,10 @@ def _exception_finding(
         state_path,
         f"tdd_evidence:exception_keys_missing — {ac_id} TDD Exception ADR is "
         f"missing or has empty values for: {sorted(missing)}",
+        fix_hint=(
+            f"Fill the {sorted(missing)} key(s) under `## TDD Exception: "
+            f"{ac_id}` in decisions.md (Rationale/Reviewer/Date)."
+        ),
     )
 
 
@@ -422,6 +426,11 @@ def _pairing_findings_for_ac(
                 state_path,
                 f"tdd_evidence:missing_test_pair — {ac_id} has impl commit "
                 f"without a preceding test commit (and no TDD Exception ADR)",
+                fix_hint=(
+                    f"Author a `test(...):` commit covering {ac_id} before "
+                    f"the impl commit, or add `## TDD Exception: {ac_id}` "
+                    f"in decisions.md."
+                ),
             )
         ]
     return [
@@ -432,6 +441,11 @@ def _pairing_findings_for_ac(
             f"tdd_evidence:refactor_unpaired — {ac_id} has refactor commit "
             f"touching production paths without a preceding test commit "
             f"(and no TDD Exception ADR)",
+            fix_hint=(
+                f"Land a `test(...):` commit pinning the behavior {ac_id} "
+                f"refactors before the refactor, or add `## TDD Exception: "
+                f"{ac_id}` in decisions.md."
+            ),
         )
     ]
 
@@ -467,6 +481,10 @@ def _orphan_commit_findings(
                 state_path,
                 f"tdd_evidence:orphan_commit_no_slice — execute commit {sha} "
                 f"({commit['subject']!r}) is not referenced by any slice-*.summary",
+                fix_hint=(
+                    f"Add `AC-<n>: {sha}` to the matching slice-*.summary so "
+                    f"the gate can map the commit to an acceptance criterion."
+                ),
             )
         )
     return out
@@ -501,6 +519,10 @@ def validate_tdd_evidence(
                 TARGET,
                 feature_dir,
                 f"tdd_evidence:feature_missing — {feature_dir} does not exist",
+                fix_hint=(
+                    f"Create the feature folder .forge/features/{feature_id}/ "
+                    f"or correct the feature id passed to the validator."
+                ),
             )
         ]
 
@@ -530,6 +552,10 @@ def validate_tdd_evidence(
                     state_path,
                     f"tdd_evidence:ac_unmapped_to_slice — {ac_id} is declared in "
                     f"SPEC.md but no slice-*.summary records a commit for it",
+                    fix_hint=(
+                        f"Record `{ac_id}: <sha>` in the relevant slice-*.summary "
+                        f"or remove {ac_id} from SPEC.md if it is out of scope."
+                    ),
                 )
             )
             continue

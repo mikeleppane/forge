@@ -140,6 +140,7 @@ def _frontmatter_findings(
             TARGET,
             qa_path,
             f"qa_shape:frontmatter_missing_key — required key {key!r} absent or empty",
+            fix_hint=(f"Add `{key}: <value>` to QA.md frontmatter per templates/feature/QA.md."),
         )
         for key in _REQUIRED_FRONTMATTER_KEYS
         if key not in fm or fm[key] in (None, "")
@@ -156,6 +157,7 @@ def _frontmatter_findings(
                 qa_path,
                 f"qa_shape:invalid_verdict_value — verdict {verdict!r} not in "
                 f"{sorted(_VALID_VERDICTS)}",
+                fix_hint=(f"Set frontmatter `verdict` to one of {sorted(_VALID_VERDICTS)}."),
             )
         )
 
@@ -168,6 +170,7 @@ def _frontmatter_findings(
                 qa_path,
                 f"qa_shape:invalid_confidence_value — confidence {confidence!r} "
                 f"not in {sorted(_VALID_CONFIDENCES)}",
+                fix_hint=(f"Set frontmatter `confidence` to one of {sorted(_VALID_CONFIDENCES)}."),
             )
         )
 
@@ -180,6 +183,10 @@ def _frontmatter_findings(
                 qa_path,
                 f"qa_shape:wrong_flow_version — flow_version is {flow_version!r}, "
                 f"expected {_EXPECTED_FLOW_VERSION}",
+                fix_hint=(
+                    f"Set frontmatter `flow_version` to {_EXPECTED_FLOW_VERSION} "
+                    f"and run state migrations if state.json uses an older flow."
+                ),
             )
         )
     return findings
@@ -218,6 +225,7 @@ def _section_findings(
             TARGET,
             qa_path,
             f"qa_shape:section_missing — required section '# {name}' absent",
+            fix_hint=(f"Add a `# {name}` section to QA.md per templates/feature/QA.md."),
         )
         for name in missing
     )
@@ -269,6 +277,7 @@ def _section_status_findings(
                     TARGET,
                     qa_path,
                     f"qa_shape:invalid_section_status — '# {name}' has no '**Status:**' line",
+                    fix_hint=(f"Add a `- **Status:** <value>` line under `# {name}` in QA.md."),
                 )
             )
             continue
@@ -281,6 +290,7 @@ def _section_status_findings(
                     qa_path,
                     f"qa_shape:invalid_section_status — '# {name}' Status "
                     f"{status!r} not in {sorted(valid)}",
+                    fix_hint=(f"Set `# {name}` Status to one of {sorted(valid)}."),
                 )
             )
             continue
@@ -335,6 +345,10 @@ def _aggregation_findings(
                     f"qa_shape:verdict_mismatch — frontmatter verdict "
                     f"{declared_verdict!r} does not match '# Acceptance' Status "
                     f"{statuses['Acceptance']!r}",
+                    fix_hint=(
+                        f"Set frontmatter `verdict` to {statuses['Acceptance']!r} "
+                        f"or fix the `# Acceptance` Status to {declared_verdict!r}."
+                    ),
                 )
             )
 
@@ -350,6 +364,10 @@ def _aggregation_findings(
                     f"qa_shape:confidence_aggregation_mismatch — declared "
                     f"{declared!r}, computed {computed!r} from sections "
                     f"{statuses}",
+                    fix_hint=(
+                        f"Set frontmatter `confidence` to {computed!r} or fix the "
+                        f"per-section statuses driving the aggregation."
+                    ),
                 )
             )
     return findings
@@ -419,6 +437,10 @@ def validate_qa_shape(repo_root: Path, feature_id: str) -> list[Finding]:
                     TARGET,
                     qa_path,
                     f"qa_shape:qa_md_missing — qa phase is done but {qa_path} does not exist",
+                    fix_hint=(
+                        "Author QA.md from templates/feature/QA.md, or roll back the "
+                        "qa phase status in state.json if QA was not actually run."
+                    ),
                 )
             ]
         return []
@@ -431,6 +453,10 @@ def validate_qa_shape(repo_root: Path, feature_id: str) -> list[Finding]:
                 TARGET,
                 qa_path,
                 f"qa_shape:qa_md_missing — {qa_path} is not a readable file",
+                fix_hint=(
+                    f"Restore {qa_path} as a readable UTF-8 file, or remove it and "
+                    f"rerun the qa phase to regenerate QA.md."
+                ),
             )
         ]
 
@@ -443,6 +469,7 @@ def validate_qa_shape(repo_root: Path, feature_id: str) -> list[Finding]:
                 TARGET,
                 qa_path,
                 f"qa_shape:frontmatter_missing_key — {exc}",
+                fix_hint=("Fix the QA.md YAML frontmatter syntax per templates/feature/QA.md."),
             )
         ]
     if parsed is None:
@@ -452,6 +479,7 @@ def validate_qa_shape(repo_root: Path, feature_id: str) -> list[Finding]:
                 TARGET,
                 qa_path,
                 "qa_shape:frontmatter_missing_key — QA.md has no parseable frontmatter block",
+                fix_hint=("Add a `---`-delimited YAML frontmatter block at the top of QA.md."),
             )
         ]
     fm, body = parsed

@@ -10,6 +10,15 @@ and the final output_text.
 ``from tools import redaction; redaction.filter(payload, config)`` rather
 than star-importing the symbol into local scope.
 
+Marker semantics: each ``[REDACTED:<idx>]`` marker references a position in
+the **merged interval set**, not a position in ``redacted_spans``. Multiple
+overlapping ``deny_regex`` matches collapse into one merged interval that
+emits a single marker; ``redacted_spans`` still records every individual
+match for caller-side audit. Without this collapse, right-to-left
+replacement using original-text offsets corrupts ``output_text`` whenever
+two patterns overlap (a later match's tail can survive an earlier match's
+replacement because the slice references the new, shorter ``output_text``).
+
 ReDoS notice: ``deny_regex`` and ``fatal_regex`` are user-supplied via
 ``cross_ai.redaction.*`` in ``.forge/config.json`` (loaded in P1).
 This module compiles them as-is. P1 owns the bootstrap path and the
@@ -245,12 +254,26 @@ def filter(  # noqa: A001 — module-level shadow is documented in module docstr
         Span(start=s, end=e, rule_id=r, sample=sample) for (s, e, r, sample) in deny_hits
     ]
 
-    # Replace right-to-left using the marker index that matches each Span's
-    # position in the ``redacted_spans`` tuple.
+    # Coalesce overlapping ranges into one merged interval each. Two patterns
+    # firing on the same secret (or any positionally-overlapping substrings)
+    # must emit a single marker covering the union — otherwise right-to-left
+    # replacement using original-text offsets clobbers the earlier marker and
+    # leaves a stray fragment of one match in ``output_text``. ``spans`` keeps
+    # the per-rule audit trail; ``merged_intervals`` drives marker emission.
+    merged_intervals: list[tuple[int, int]] = []
+    for span in spans:
+        if merged_intervals and span.start < merged_intervals[-1][1]:
+            cur_start, cur_end = merged_intervals[-1]
+            merged_intervals[-1] = (cur_start, max(cur_end, span.end))
+        else:
+            merged_intervals.append((span.start, span.end))
+
+    # Replace right-to-left so earlier offsets stay valid against the original
+    # text. Marker index references the merged interval set.
     output_text = text
-    for idx in range(len(spans) - 1, -1, -1):
-        span = spans[idx]
-        output_text = output_text[: span.start] + f"[REDACTED:{idx}]" + output_text[span.end :]
+    for idx in range(len(merged_intervals) - 1, -1, -1):
+        m_start, m_end = merged_intervals[idx]
+        output_text = output_text[:m_start] + f"[REDACTED:{idx}]" + output_text[m_end:]
 
     # Fatal regex: record only, NEVER mutate output_text.
     fatal: list[Match] = []

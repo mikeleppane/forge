@@ -19,6 +19,7 @@ from ._feature_layout import PLAN_FILENAME, SPEC_FILENAME
 from ._finding import EXIT_NONZERO_SEVERITIES, Finding, _finding_to_dict
 from .constitution import validate_constitution
 from .delta import validate_delta
+from .domain_glossary import validate_domain_glossary
 from .health import validate_health
 from .plan import validate_plan_tasks, validate_verified_deps
 from .spec_semantic import validate_anchors, validate_scenarios
@@ -42,7 +43,7 @@ _PER_FILE_TARGETS: frozenset[str] = frozenset(
         "verified-deps",
     }
 )
-_PER_FOLDER_TARGETS: frozenset[str] = frozenset({"deviations", "tdd_evidence"})
+_PER_FOLDER_TARGETS: frozenset[str] = frozenset({"deviations", "tdd_evidence", "domain_glossary"})
 _REPO_WIDE_TARGETS: frozenset[str] = frozenset({"health", "ship", "all"})
 
 _TARGET_CHOICES: tuple[str, ...] = (
@@ -56,6 +57,7 @@ _TARGET_CHOICES: tuple[str, ...] = (
     "verified-deps",
     "deviations",
     "tdd_evidence",
+    "domain_glossary",
     "constitution",
     "health",
     "ship",
@@ -119,6 +121,10 @@ def _dispatch_tdd_evidence(args: argparse.Namespace, repo_root: Path) -> list[Fi
     return list(validate_tdd_evidence(repo_root, args.path.name))
 
 
+def _dispatch_domain_glossary(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
+    return list(validate_domain_glossary(repo_root, args.path.name))
+
+
 def _dispatch_constitution(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
     resolved = args.path if args.path is not None else repo_root / ".forge" / "CONSTITUTION.md"
     return list(validate_constitution(resolved))
@@ -168,6 +174,7 @@ def _dispatch_all(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
                 continue
             findings.extend(validate_deviations(feature))
             findings.extend(validate_tdd_evidence(repo_root, feature.name))
+            findings.extend(validate_domain_glossary(repo_root, feature.name))
             spec = feature / SPEC_FILENAME
             plan = feature / PLAN_FILENAME
             if spec.is_file():
@@ -196,6 +203,7 @@ _TARGET_DISPATCH: dict[str, Callable[[argparse.Namespace, Path], list[Finding]]]
     "verified-deps": _dispatch_verified_deps,
     "deviations": _dispatch_deviations,
     "tdd_evidence": _dispatch_tdd_evidence,
+    "domain_glossary": _dispatch_domain_glossary,
     "constitution": _dispatch_constitution,
     "health": _dispatch_health,
     "ship": _dispatch_ship,

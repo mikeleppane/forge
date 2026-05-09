@@ -18,6 +18,7 @@ from ._finding import (
 from .cli import main
 from .constitution import validate_constitution
 from .delta import validate_delta
+from .domain_glossary import validate_domain_glossary
 from .health import validate_health
 from .plan import validate_plan_tasks, validate_verified_deps
 from .spec_semantic import validate_anchors, validate_scenarios
@@ -42,6 +43,7 @@ __all__ = [
     "validate_constitution",
     "validate_delta",
     "validate_deviations",
+    "validate_domain_glossary",
     "validate_frontmatter",
     "validate_health",
     "validate_negative_requirements",

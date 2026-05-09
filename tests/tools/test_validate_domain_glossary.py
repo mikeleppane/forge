@@ -37,15 +37,7 @@ def _make_feature(tmp_path: Path, *, tier: str = "full") -> Path:
 
 
 def _write_spec(feature_dir: Path, intent: str, scenarios: str) -> None:
-    body = (
-        "---\n"
-        f"id: {_FEATURE_ID}\n"
-        "---\n\n"
-        "# Intent\n\n"
-        f"{intent}\n\n"
-        "# Scenarios\n\n"
-        f"{scenarios}\n"
-    )
+    body = f"---\nid: {_FEATURE_ID}\n---\n\n# Intent\n\n{intent}\n\n# Scenarios\n\n{scenarios}\n"
     (feature_dir / "SPEC.md").write_text(body, encoding="utf-8")
 
 

@@ -227,10 +227,13 @@ def test_cli_target_all_skips_archive_subdirectory(
             seen_feature_ids.append(args[0].name)
         return []
 
+    def noop(*_args: object, **_kwargs: object) -> list[object]:
+        return []
+
     monkeypatch.setattr(validate_cli, "validate_deviations", capture_feature)
-    monkeypatch.setattr(validate_cli, "validate_tdd_evidence", lambda *a, **kw: [])
-    monkeypatch.setattr(validate_cli, "validate_domain_glossary", lambda *a, **kw: [])
-    monkeypatch.setattr(validate_cli, "validate_qa_shape", lambda *a, **kw: [])
+    monkeypatch.setattr(validate_cli, "validate_tdd_evidence", noop)
+    monkeypatch.setattr(validate_cli, "validate_domain_glossary", noop)
+    monkeypatch.setattr(validate_cli, "validate_qa_shape", noop)
 
     archived = tmp_path / ".forge" / "features" / "archive" / "2026-05-01-old"
     archived.mkdir(parents=True)

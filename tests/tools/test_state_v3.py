@@ -138,6 +138,51 @@ def test_state_schema_skipped_and_deviations_and_commits_accept_qa(
     assert errors == [], f"qa phase rejected by an array enum: {errors}"
 
 
+def test_state_schema_accepts_shipped_at_optional(schemas_dir: Path) -> None:
+    """Top-level shipped_at (date-time) must be accepted by the schema."""
+    payload = _base_state()
+    payload["shipped_at"] = "2026-05-09T11:15:00Z"
+    validator = _validator_for(schemas_dir / "state.schema.json")
+    errors = list(validator.iter_errors(payload))
+    assert errors == [], f"validator rejected shipped_at: {errors}"
+
+
+def test_state_schema_accepts_state_without_shipped_at(schemas_dir: Path) -> None:
+    """Backward compat: state.json without shipped_at still validates (pre-ship)."""
+    payload = _base_state()
+    assert "shipped_at" not in payload
+    validator = _validator_for(schemas_dir / "state.schema.json")
+    errors = list(validator.iter_errors(payload))
+    assert errors == [], f"validator must accept absent shipped_at: {errors}"
+
+
+def test_state_schema_rejects_malformed_shipped_at(schemas_dir: Path) -> None:
+    """shipped_at must be a date-time string; reject free-form text."""
+    payload = _base_state()
+    payload["shipped_at"] = "yesterday"
+    validator = _validator_for(schemas_dir / "state.schema.json")
+    errors = list(validator.iter_errors(payload))
+    assert errors, "validator must reject non-RFC3339 shipped_at"
+
+
+def test_migrate_to_v3_finds_shipped_at_when_set(tmp_path: Path, schemas_dir: Path) -> None:
+    """A feature with shipped_at set (and no ship phase entry) still migrates to v3."""
+    payload = _base_state()
+    # Drop the ship phase so the migration must fall back to shipped_at gating.
+    payload["phases"].pop("ship")
+    payload["current_phase"] = "ship"
+    payload["shipped_at"] = "2026-05-09T11:15:00Z"
+    feature_id = _seed_feature(tmp_path, payload)
+
+    updated = state.migrate_to_v3(
+        tmp_path, feature_id, schema_path=schemas_dir / "state.schema.json"
+    )
+
+    assert updated["flow_version"] == 3
+    assert updated["phases"]["qa"] == {"status": "pending"}
+    assert updated["shipped_at"] == "2026-05-09T11:15:00Z"
+
+
 def test_budget_schema_accepts_qa_phase(schemas_dir: Path) -> None:
     """budget.schema.json's phase enum must mirror state.schema.json + 'qa'."""
     payload = {

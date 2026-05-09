@@ -199,6 +199,33 @@ def test_validate_health_flags_orphan_for_refine_in_progress_unchanged(tmp_path:
     assert orphan_findings[0].severity == "LOW"
 
 
+def test_validate_health_fail_closed_on_malformed_commits_value(tmp_path: Path) -> None:
+    """L8: a malformed ``commits`` value (anything other than ``[]``) must
+    be treated as not-orphan by health.py, mirroring the fail-closed
+    archive.py predicate. The previous ``commits = payload.get("commits") or []``
+    silently coerced ``None``, ``"", ``0``, ``False``, or any non-list to ``[]``
+    and produced an orphan flag — that's a data-loss vector if cleanup were
+    ever wired off the health finding.
+    """
+    # Each malformed shape must NOT produce an orphan finding.
+    for index, malformed in enumerate(["", None, 0, False, "ignored", {"x": 1}]):
+        feature_id = f"2026-05-08-malformed-{index}"
+        _seed_feature(
+            tmp_path,
+            feature_id,
+            current_phase="spec",
+            phases={"spec": {"status": "in_progress"}},
+            commits=malformed,
+        )
+
+    findings = validate_health(tmp_path)
+    malformed_orphan = [f for f in findings if "malformed-" in f.message and "orphan" in f.message]
+    assert malformed_orphan == [], (
+        f"health.py must fail closed on malformed commits values "
+        f"(parity with archive.py); got orphan findings: {malformed_orphan}"
+    )
+
+
 def test_validate_health_orphan_message_names_phase_and_helper(tmp_path: Path) -> None:
     """Orphan finding message must (a) name the actual phase and (b) point at the
     correct helper: cleanup_seeded_feature for spec, cleanup_orphan_feature for refine.

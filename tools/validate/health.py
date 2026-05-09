@@ -87,7 +87,13 @@ def _check_feature_payload(
         )
         return findings
 
-    commits = payload.get("commits") or []
+    # L8: fail-closed against malformed ``commits`` values (parity with
+    # archive.py).  ``payload.get("commits") or []`` previously coerced
+    # ``None`` / ``0`` / ``False`` / ``""`` / non-list to ``[]`` and treated
+    # them as orphan-eligible.  The orphan branch must require commits to
+    # be EXACTLY an empty list — anything else (missing, wrong type, or
+    # non-empty) is not-orphan.
+    commits_is_empty_list = payload.get("commits") == []
     seed_phase_block = (
         phases.get(current_phase)
         if isinstance(phases, dict) and current_phase in _ORPHAN_SEED_PHASES
@@ -98,7 +104,7 @@ def _check_feature_payload(
         current_phase in _ORPHAN_SEED_PHASES
         and isinstance(seed_phase_block, dict)
         and seed_phase_block.get("status") == "in_progress"
-        and not commits
+        and commits_is_empty_list
         and not extra_files
     ):
         # Helper hint differs by entry point: refine seeds come from

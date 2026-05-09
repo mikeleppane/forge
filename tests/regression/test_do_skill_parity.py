@@ -1,9 +1,8 @@
 """Regression: forge-do skill + /forge:do command shape parity.
 
-Pins the locked contract for `/forge:do` adaptive routing introduced in
-M3 P6.1 (focused + standard tiers) and extended in M3 P6.2 (full tier).
-Parity is enforced via greppable substring assertions so future drift is
-caught before merge.
+Pins the locked contract for `/forge:do` adaptive routing across all
+three tiers (focused, standard, full).  Parity is enforced via greppable
+substring assertions so future drift is caught before merge.
 
 Asserts:
 1. SKILL.md frontmatter sets ``disable-model-invocation: true``.
@@ -11,8 +10,8 @@ Asserts:
 3. SKILL.md body documents 11 numbered lifecycle steps.
 4. SKILL.md prints the literal secrets warning before persisting
    ``routing.idea``.
-5. SKILL.md no longer carries the P6.1 ``--full`` ``NotImplementedError``
-   pointer (full-tier routing shipped in P6.2).
+5. SKILL.md no longer carries the legacy ``--full`` ``NotImplementedError``
+   pointer (full-tier routing is shipped now).
 6. SKILL.md instructs the lightweight health preflight via
    ``python -m tools.validate --target health``.
 7. Capability scan disambig prose mirrors ``forge-spec`` and never offers
@@ -129,8 +128,8 @@ def test_skill_full_tier_raise_pointer_removed() -> None:
     """
     text = _read(SKILL_PATH)
     assert "--full routing ships in M3 P6.2" not in text, (
-        "SKILL.md must NOT carry the P6.1 NotImplementedError pointer — "
-        "full-tier routing shipped in P6.2 and the prose is now stale"
+        "SKILL.md must NOT carry the legacy NotImplementedError pointer — "
+        "full-tier routing is shipped and that prose is stale"
     )
 
 
@@ -198,7 +197,7 @@ def test_skill_dispatch_literal() -> None:
     leading whitespace and a single optional surrounding backtick (the
     literal is rendered as inline code in SKILL.md step 11).
 
-    Locks remediation for M3 P6.1 T7 finding p6-1-L3.
+    Locks the line-anchored handoff-literal contract.
     """
     text = _read(SKILL_PATH)
     expected = "Next: /forge:spec --feature <feature_id>"
@@ -255,22 +254,22 @@ def test_command_argument_hint_matches_refine_convention() -> None:
 
 
 def test_command_drops_full_raises_caveat() -> None:
-    """P6.2 lifted the ``--full`` ``NotImplementedError``; the caveat is gone.
+    """The legacy ``--full`` ``NotImplementedError`` caveat must be gone.
 
     The command file MUST still mention ``--full`` (the flag is documented in
-    the args + argument-hint), but the P6.1 caveat prose ("raises
-    NotImplementedError until P6.2", the "## --full caveat (until M3 P6.2)"
+    the args + argument-hint), but the legacy caveat prose ("raises
+    NotImplementedError until ...", the "## --full caveat (until ...)"
     section, etc.) MUST be absent.
     """
     text = _read(COMMAND_PATH)
     assert "--full" in text, "commands/do.md must still mention --full as a valid tier flag"
     assert "NotImplementedError" not in text, (
-        "commands/do.md must NOT carry the P6.1 NotImplementedError caveat — "
-        "full-tier routing shipped in P6.2"
+        "commands/do.md must NOT carry the legacy NotImplementedError "
+        "caveat — full-tier routing is shipped now"
     )
     assert "until M3 P6.2" not in text, (
-        "commands/do.md must NOT carry the 'until M3 P6.2' caveat — full-tier "
-        "routing shipped in P6.2"
+        "commands/do.md must NOT carry the legacy 'until ...' caveat — "
+        "full-tier routing is shipped now"
     )
     assert "--full caveat" not in text, (
         "commands/do.md must NOT retain the '## --full caveat' section header"
@@ -362,7 +361,6 @@ def test_skill_cleanup_caveat_decisions_md_lost() -> None:
     never inspected.  The SKILL.md MUST surface this caveat so users know
     to commit decisions worth keeping before cancelling.
 
-    Locks remediation for M3 P6.1 T7 finding p6-1-M2.
     """
     text = _read(SKILL_PATH)
     assert "filename-based, not content-based" in text, (
@@ -549,7 +547,7 @@ def test_command_confirm_ui_lists_full_as_override() -> None:
 
 
 # ---------------------------------------------------------------------------
-# M6 finding M4: SKILL + command reject multi-flag input at parse time
+# SKILL + command reject multi-flag input at parse time
 # ---------------------------------------------------------------------------
 
 

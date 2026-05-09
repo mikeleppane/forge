@@ -20,13 +20,13 @@ The function composes T0.5 + T2 + existing P5/P1 helpers:
     folder was created on disk.
 
 All three tiers seed normally: ``focused`` / ``standard`` enter at
-``current_phase="spec"`` (P6.1 default), and ``full`` enters at
-``current_phase="refine"`` (P6.2 — refine is full-tier-only per the locked
-constraint enforced by ``create_feature_folder``).  Unknown tiers refuse
-via :class:`ValueError` BEFORE any mutation, so the seed slot can never
-leave a partial folder behind.
+``current_phase="spec"``, and ``full`` enters at ``current_phase="refine"``
+(refine is full-tier-only per the locked constraint enforced by
+``create_feature_folder``).  Unknown tiers refuse via :class:`ValueError`
+BEFORE any mutation, so the seed slot can never leave a partial folder
+behind.
 
-Coverage AC: 100% on this module (M3 P6.1 plan §AC #5; preserved by P6.2).
+Coverage AC: 100% on this module.
 """
 
 from __future__ import annotations
@@ -51,16 +51,16 @@ from tools.state import (
 
 # Schema-aligned capability slug pattern.  Mirrors
 # ``tools.archive._CAPABILITY_SLUG_SCHEMA_RE`` (≥3 chars, alnum-leading,
-# no trailing hyphen, no consecutive hyphens — M6 finding L1).  Used
-# to validate the operator-supplied ``feature_slug`` for the suffix-disambig
-# branch — the chosen ``<slug>-v2`` / ``<slug>-bulk`` slug must satisfy the
-# same shape as a slug derived from ``slug_from_idea``.
+# no trailing hyphen, no consecutive hyphens).  Used to validate the
+# operator-supplied ``feature_slug`` for the suffix-disambig branch — the
+# chosen ``<slug>-v2`` / ``<slug>-bulk`` slug must satisfy the same shape
+# as a slug derived from ``slug_from_idea``.
 _FEATURE_SLUG_RE: re.Pattern[str] = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){2,}$")
 
 # Mirrors ``schemas/state.schema.json`` ``routing.idea.maxLength``.  The
 # helper pre-validates length BEFORE any disk mutation so an overlong idea
 # surfaces a clean cap error instead of the schema's verbose validation
-# dump (which inlines the entire payload — M6 finding M7).
+# dump (which inlines the entire payload).
 _IDEA_MAX_CHARS: int = 4000
 
 
@@ -92,7 +92,7 @@ def seed_routed_feature(
       2. Derive ``current_phase`` from ``final_tier``:
          ``full`` → ``"refine"``; ``focused`` / ``standard`` → ``"spec"``.
          The full-tier branch relies on ``create_feature_folder`` to enforce
-         the refine⇒full constraint (M3 P6.2 T1).
+         the refine⇒full constraint.
       3. Compute ``today_iso`` from ``today`` (or ``date.today()`` when
          omitted) and ``feature_id = f"{today_iso}-{slug_from_idea(idea)}"``
          (or ``feature_slug`` when given for suffix-disambig).
@@ -161,11 +161,11 @@ def seed_routed_feature(
     if final_tier not in VALID_TIERS:
         raise ValueError(f"invalid final_tier {final_tier!r}; must be one of {VALID_TIERS}")
 
-    # M6 finding M7: pre-validate idea length BEFORE any other mutation
-    # so the operator sees a clean cap error instead of the schema's
-    # 6000-char ValidationError dump (which inlines the full payload).
-    # The schema mirrors the same 4000-char cap; we surface the friendly
-    # message here so the routing helper owns the user-visible wording.
+    # Pre-validate idea length BEFORE any other mutation so the operator
+    # sees a clean cap error instead of the schema's verbose ValidationError
+    # dump (which inlines the full payload). The schema mirrors the same
+    # 4000-char cap; we surface the friendly message here so the routing
+    # helper owns the user-visible wording.
     if len(idea) > _IDEA_MAX_CHARS:
         raise ValueError(
             f"idea exceeds {_IDEA_MAX_CHARS}-char cap (got {len(idea)} chars); "
@@ -209,10 +209,10 @@ def seed_routed_feature(
     feature_id = f"{today_iso}-{slug}"
 
     # Step 4: schema path passed to BOTH helpers so payload validation
-    # refuses BEFORE any disk write. M6 finding M9: pre-check the schema
-    # file exists and surface a clean RuntimeError naming the missing
-    # path so the operator does not see a raw FileNotFoundError bubble
-    # up from inside write_state.
+    # refuses BEFORE any disk write. Pre-check the schema file exists and
+    # surface a clean RuntimeError naming the missing path so the operator
+    # does not see a raw FileNotFoundError bubble up from inside
+    # write_state.
     schema_path = repo_root / "schemas" / "state.schema.json"
     if not schema_path.is_file():
         raise RuntimeError(
@@ -252,7 +252,7 @@ def seed_routed_feature(
     # one-line WARN and re-raise the ORIGINAL exception via ``raise original``.
     # We catch ``BaseException`` from cleanup — not just ``Exception`` — so a
     # ``KeyboardInterrupt`` during rmtree can never mask the underlying
-    # ``record_routing_decision`` failure.  Addresses M3 P6.1 T7 finding p6-1-M3.
+    # ``record_routing_decision`` failure.
     state_path = folder / "state.json"
     try:
         record_routing_decision(
@@ -268,10 +268,10 @@ def seed_routed_feature(
         try:
             cleanup_seeded_feature(repo_root, feature_id)
         except (KeyboardInterrupt, SystemExit):
-            # M6 deep-tester finding M6: a user-cancel signal mid-rollback
-            # (Ctrl-C / SystemExit) MUST propagate so the operator sees the
-            # actual cancel, instead of being silently masked by the original
-            # routing exception. The partial folder may remain on disk —
+            # A user-cancel signal mid-rollback (Ctrl-C / SystemExit) MUST
+            # propagate so the operator sees the actual cancel, instead of
+            # being silently masked by the original routing exception. The
+            # partial folder may remain on disk —
             # surface that in the WARN so the operator can clean up manually.
             print(
                 "WARN: USER CANCELLED MID-ROLLBACK; "

@@ -212,10 +212,9 @@ def test_refine_skill_documents_cli_idea_fallback() -> None:
 def test_refine_skill_names_canonical_entry_path() -> None:
     """SKILL.md must name ``/forge:do --full`` as the canonical entry path.
 
-    Replaces the P6.1 'bootstrap caveat (until P6.2)' assertion: now that
-    P6.2 has shipped, the only invariant left is that the skill points
-    callers at ``/forge:do --full`` rather than at hand-bootstrapping a
-    refine-tier feature folder.
+    Now that the full-tier routing entry is wired end-to-end, the only
+    invariant left is that the skill points callers at ``/forge:do --full``
+    rather than at hand-bootstrapping a refine-tier feature folder.
     """
     text = _read(SKILL_PATH)
     assert "/forge:do --full" in text, (
@@ -227,7 +226,7 @@ def test_refine_skill_names_canonical_entry_path() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 15. P6.2 T4: pre-seed predicate four conjuncts present
+# 15. pre-seed predicate four conjuncts present
 # ---------------------------------------------------------------------------
 
 
@@ -263,7 +262,7 @@ def test_refine_pre_seed_predicate_four_conjuncts_present() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 16. P6.2 T4: pre-seed branch skips record_routing_decision
+# 16. pre-seed branch skips record_routing_decision
 # ---------------------------------------------------------------------------
 
 
@@ -287,16 +286,15 @@ def test_refine_pre_seed_branch_skips_record_routing_decision() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 17. P6.2 T4: direct-invocation fallback retained
+# 17. direct-invocation fallback retained
 # ---------------------------------------------------------------------------
 
 
 def test_refine_direct_invocation_fallback_retained() -> None:
-    """The direct-invocation fallback (existing M3 P4 behavior) must still
-    be documented — when the pre-seed predicate fails, prose still
-    describes the path that seeds routing via
-    ``record_routing_decision(... final_tier="full" ...)`` from the CLI
-    ``<idea>`` argument.
+    """The direct-invocation fallback must still be documented — when the
+    pre-seed predicate fails, prose still describes the path that seeds
+    routing via ``record_routing_decision(... final_tier="full" ...)`` from
+    the CLI ``<idea>`` argument.
     """
     text = _read(SKILL_PATH)
     assert "direct-invocation" in text.lower() or "direct invocation" in text.lower(), (
@@ -313,22 +311,22 @@ def test_refine_direct_invocation_fallback_retained() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 18. P6.2 T4: bootstrap caveat removed; /forge:do --full canonical entry
+# 18. bootstrap caveat removed; /forge:do --full canonical entry
 # ---------------------------------------------------------------------------
 
 
 def test_refine_bootstrap_caveat_removed() -> None:
-    """The 'Bootstrap caveat (until M3 P6.2 ships ...)' prose must be GONE
-    from SKILL.md, and ``/forge:do --full`` must be named as the
-    canonical entry path.
+    """The legacy 'Bootstrap caveat' prose must be GONE from SKILL.md, and
+    ``/forge:do --full`` must be named as the canonical entry path.
     """
     text = _read(SKILL_PATH)
     assert "Bootstrap caveat (until M3 P6.2 ships" not in text, (
-        "SKILL.md must drop the 'Bootstrap caveat (until M3 P6.2 ships' "
-        "section header — P6.2 is shipped now"
+        "SKILL.md must drop the legacy bootstrap-caveat section header — "
+        "the full-tier routing entry is shipped now"
     )
     assert "until M3 P6.2" not in text, (
-        "SKILL.md must drop any 'until M3 P6.2' wording — P6.2 is shipped now"
+        "SKILL.md must drop any 'until ... ships' wording for the "
+        "full-tier routing entry — it is shipped now"
     )
     assert "/forge:do --full" in text, (
         "SKILL.md must name `/forge:do --full` as the canonical entry path"
@@ -339,22 +337,23 @@ def test_refine_bootstrap_caveat_removed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 19. P6.2 T4: command file drops bootstrap caveat
+# 19. command file drops bootstrap caveat
 # ---------------------------------------------------------------------------
 
 
 def test_refine_command_drops_bootstrap_caveat() -> None:
-    """commands/refine.md must no longer carry the 'Bootstrap caveat
-    (until M3 P6.2)' section header, and the 'until M3 P6.2' wording
-    must be gone from the command file too.
+    """commands/refine.md must no longer carry the legacy bootstrap-caveat
+    section header, and any 'until ... ships' caveat wording must be gone
+    from the command file too.
     """
     text = _read(COMMAND_PATH)
     assert "Bootstrap caveat (until M3 P6.2)" not in text, (
-        "commands/refine.md must drop the '## Bootstrap caveat (until M3 P6.2)' "
-        "section header — P6.2 is shipped now"
+        "commands/refine.md must drop the legacy bootstrap-caveat section "
+        "header — the full-tier routing entry is shipped now"
     )
     assert "until M3 P6.2" not in text, (
-        "commands/refine.md must drop any 'until M3 P6.2' wording — P6.2 is shipped now"
+        "commands/refine.md must drop any 'until ... ships' wording for "
+        "the full-tier routing entry — it is shipped now"
     )
     assert "/forge:do --full" in text, (
         "commands/refine.md must still mention `/forge:do --full` as the canonical entry path"
@@ -362,7 +361,7 @@ def test_refine_command_drops_bootstrap_caveat() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 20. P6.2 T4: pre-seed clobber rationale documented
+# 20. pre-seed clobber rationale documented
 # ---------------------------------------------------------------------------
 
 
@@ -383,7 +382,7 @@ def test_refine_pre_seed_does_not_clobber_decided_at() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 21. M6 finding M2: guard_refine_entry called BEFORE any state mutation
+# guard_refine_entry called BEFORE any state mutation
 # ---------------------------------------------------------------------------
 
 

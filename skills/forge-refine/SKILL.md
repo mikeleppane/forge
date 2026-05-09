@@ -46,10 +46,10 @@ re-running refine on an existing feature whose `current_phase` is already
 ## Mode resolution
 
 Two entry paths converge on this skill: the **`/forge:do --full` pre-seed**
-branch (M3 P6.2+, the routing entry-point seeded the feature folder +
+branch (the routing entry-point seeded the feature folder +
 `state.json.routing` block + advanced `current_phase` to `refine` before
-dispatching here) and the **direct-invocation fallback** (M3 P4 path —
-`/forge:refine --feature <id> "<idea>"` invoked standalone against an
+dispatching here) and the **direct-invocation fallback**
+(`/forge:refine --feature <id> "<idea>"` invoked standalone against an
 existing feature folder, no upstream `/forge:do` seed).
 
 **Pre-seed predicate (locked, four-conjunct AND).** The pre-seed branch
@@ -71,9 +71,8 @@ direct-invocation fallback path runs:
 
 All four conjuncts must hold for the pre-seed branch to fire. If any
 conjunct fails — including the routing block being absent — the
-**direct-invocation fallback** branch runs as today (M3 P4 behavior:
-seed the routing block from CLI `<idea>` if `routing.idea` is absent;
-abort if both are absent).
+**direct-invocation fallback** branch runs: seed the routing block from
+CLI `<idea>` if `routing.idea` is absent; abort if both are absent.
 
 **Pre-seed branch behavior.** When the predicate holds, `/forge:refine`
 ENTERS the Socratic loop directly using `state.json.routing.idea` as the
@@ -88,7 +87,7 @@ pre-seed and direct-invocation paths must satisfy `current_phase ==
 
 **Direct-invocation fallback behavior.** When ANY conjunct fails (e.g.,
 `routing` block absent because the user invoked `/forge:refine`
-standalone), retain existing M3 P4 behavior: seed the routing block via
+standalone), seed the routing block via
 `record_routing_decision(path, idea=<idea>, final_tier="full",
 proposed_tier="full", rationale="direct /forge:refine invocation")` from
 the CLI `<idea>` if `routing.idea` is absent; if both `routing.idea` AND
@@ -124,8 +123,8 @@ under "Inputs" above.
      it as the seed text and ignore any CLI `<idea>` argument — routing
      is the canonical record. Do **NOT** call `record_routing_decision`
      again; doing so would clobber the seed `decided_at` timestamp.
-   - **Direct-invocation fallback** (any conjunct fails): existing M3 P4
-     behavior. If `routing.idea` is present, use it and ignore any CLI
+   - **Direct-invocation fallback** (any conjunct fails). If
+     `routing.idea` is present, use it and ignore any CLI
      `<idea>`. If `routing.idea` is absent AND a CLI `<idea>` was passed,
      seed the routing block first via
      `tools.state.record_routing_decision(path, idea=<idea>, final_tier="full",

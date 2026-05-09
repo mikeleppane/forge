@@ -720,7 +720,7 @@ def test_next_phase_command_returns_none_for_non_string_tier() -> None:
 
 
 # ---------------------------------------------------------------------------
-# routing.idea length cap (M3 P6.1 T7 finding p6-1-L5)
+# routing.idea length cap
 # ---------------------------------------------------------------------------
 
 

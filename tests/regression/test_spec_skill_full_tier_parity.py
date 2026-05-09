@@ -1,6 +1,6 @@
 """Regression: forge-spec full-tier narrative parity.
 
-Locks the M3 P4 T4 narrative additions to ``skills/forge-spec/SKILL.md``:
+Locks the full-tier narrative additions to ``skills/forge-spec/SKILL.md``:
 1. Step 6 Intent draft consumes ``state.json.refined_idea`` verbatim when set
    by ``/forge:refine``.
 2. Step 6 Domain section may stay as the single-line placeholder

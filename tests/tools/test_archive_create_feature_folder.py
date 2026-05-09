@@ -1,4 +1,4 @@
-"""Tests for create_feature_folder (M3 P6.1 T2 contract).
+"""Tests for create_feature_folder.
 
 Composes existing templates/feature/ files (state.json, SPEC.md,
 decisions.md) into a fresh .forge/features/<feature_id>/ folder.  Per-file

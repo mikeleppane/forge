@@ -1,22 +1,20 @@
-"""Smoke tests for the ``/forge:do --full`` post-confirm routing surface (M3 P6.2 T6).
+"""Smoke tests for the ``/forge:do --full`` post-confirm routing surface.
 
 Walks the full-tier branch of :func:`tools.routing.seed_routed_feature` end-to-end
 through the documented Python helper sequence — no live LLM, no slash-command
 runtime, no user dialogue.  Mirrors the focused/standard model in
-``tests/smoke/test_do_routing_smoke.py`` but pins the post-P6.2 contract:
+``tests/smoke/test_do_routing_smoke.py`` and pins the full-tier contract:
 
   * Full tier seeds ``current_phase="refine"`` (NOT ``"spec"``).
   * The walk advances ``refine → spec → domain`` via the state helpers,
     asserting :func:`tools.state.next_phase_command` returns the right slash
     literal at every boundary.
   * ``state.json.refined_idea`` survives the ``refine → spec`` transition
-    (P4 contract; spec consumes it as Intent draft).
+    (spec consumes it as Intent draft).
   * The capability slug is locked at ``/forge:do`` time via the
     ``feature_slug`` override; refine itself does NOT re-derive or re-scan.
   * Post-seed cleanup wraps ``record_routing_decision`` failures even on the
     full-tier path.
-
-Coverage target: AC #5, #6, #8, #10 from the M3 P6.2 plan.
 """
 
 from __future__ import annotations

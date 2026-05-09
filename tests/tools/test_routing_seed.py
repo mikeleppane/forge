@@ -1,11 +1,11 @@
-"""Tests for ``tools.routing.seed_routed_feature`` (M3 P6.1 T1 + P6.2 T2 contract).
+"""Tests for ``tools.routing.seed_routed_feature``.
 
-The helper composes :func:`tools.archive.create_feature_folder` (T2) and
-:func:`tools.state.record_routing_decision` (P1) with a post-seed cleanup
-wrapper backed by :func:`tools.archive.cleanup_seeded_feature` (T0.5).  All
-schema validation runs against ``schemas/state.schema.json`` BEFORE any disk
-mutation.  As of P6.2, ``--full`` seeds normally with
-``current_phase="refine"``; focused/standard seed with ``current_phase="spec"``.
+The helper composes :func:`tools.archive.create_feature_folder` and
+:func:`tools.state.record_routing_decision` with a post-seed cleanup
+wrapper backed by :func:`tools.archive.cleanup_seeded_feature`.  All
+schema validation runs against ``schemas/state.schema.json`` BEFORE any
+disk mutation.  ``--full`` seeds with ``current_phase="refine"``;
+focused/standard seed with ``current_phase="spec"``.
 """
 
 from __future__ import annotations
@@ -343,9 +343,9 @@ def test_feature_slug_accepted_at_three_char_boundary(tmp_path: Path) -> None:
 
 
 def test_seed_routed_feature_missing_schema_raises_runtime_error(tmp_path: Path) -> None:
-    """M6 finding M9: a missing schemas/state.schema.json must surface a
-    clean RuntimeError naming the missing path, not a raw FileNotFoundError
-    bubbled up from inside write_state.
+    """A missing schemas/state.schema.json must surface a clean RuntimeError
+    naming the missing path, not a raw FileNotFoundError bubbled up from
+    inside write_state.
     """
     # NOTE: do NOT call _stage_repo — the test exercises the no-schema branch.
     repo = tmp_path
@@ -359,9 +359,8 @@ def test_seed_routed_feature_missing_schema_raises_runtime_error(tmp_path: Path)
 
 
 def test_seed_routed_feature_idea_over_4000_chars_raises_clean_error(tmp_path: Path) -> None:
-    """M6 finding M7: a >4000-char idea must surface a clean cap error
-    rather than the 6000-char schema-validation dump that includes the
-    full payload inline.
+    """A >4000-char idea must surface a clean cap error rather than the
+    schema-validation dump that includes the full payload inline.
 
     The seeder pre-validates ``len(idea) <= 4000`` BEFORE any disk mutation
     and raises ``ValueError`` with a message containing ``trim`` so the
@@ -574,8 +573,7 @@ def test_cleanup_failure_with_baseexception_preserves_original(
     the ORIGINAL ``record_routing_decision`` exception must still propagate
     and a one-line WARN must hit stderr.
 
-    Locks remediation for M3 P6.1 T7 finding p6-1-M3 + M6 deep-tester M6:
-    the BaseException catch around cleanup must distinguish between
+    The BaseException catch around cleanup must distinguish between
     user-cancel signals (KeyboardInterrupt / SystemExit, propagated) and
     other cleanup faults (suppressed; original re-raised).
     """
@@ -649,10 +647,10 @@ def test_cleanup_keyboard_interrupt_propagates_over_original(
     'USER CANCELLED MID-ROLLBACK' WARN so the operator knows the partial
     folder may remain at .forge/features/<id>.
 
-    M6 deep-tester finding M6: previously the BaseException catch silently
-    swallowed cleanup-side KeyboardInterrupt and re-raised the original
-    exception, so a Ctrl-C mid-rollback looked like a clean failure even
-    though the partial folder was still on disk.
+    Previously the BaseException catch silently swallowed cleanup-side
+    KeyboardInterrupt and re-raised the original exception, so a Ctrl-C
+    mid-rollback looked like a clean failure even though the partial
+    folder was still on disk.
     """
     repo = _stage_repo(tmp_path)
 

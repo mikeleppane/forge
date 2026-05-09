@@ -49,12 +49,12 @@ except ModuleNotFoundError:  # pragma: no cover - non-POSIX (Windows)
 _FLOW_VERSION_V3 = 3
 _CAPABILITY_RE = re.compile(r"^[a-z0-9-]+$")
 # Schema-aligned slug: must start with alnum, at least 3 chars total, and
-# never carry a trailing hyphen or two consecutive hyphens (M6 finding L1).
+# never carry a trailing hyphen or two consecutive hyphens.
 # Matches schemas/capability-spec-frontmatter.schema.json and
 # delta-proposal-frontmatter.schema.json:affects_capability.
 _CAPABILITY_SLUG_SCHEMA_RE = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){2,}$")
 # Strict feature-id: ``YYYY-MM-DD`` + alnum-leading slug with no trailing
-# hyphen and no consecutive hyphens (M6 finding L1).
+# hyphen and no consecutive hyphens.
 _FEATURE_ID_RE = re.compile(
     r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9]))+$"
 )
@@ -195,10 +195,9 @@ def scan_existing_capabilities(repo_root: Path) -> list[str]:
 
 
 # _ORPHAN_SEED_PHASES is sourced from tools/validate/_feature_layout.py so the
-# orphan predicate stays in lock-step with health.py (M3 P6.1 T7 finding
-# p6-1-M1).  The set covers BOTH the original P5 refine-tier path
-# (cleanup_orphan_feature) AND the P6.1 focused/standard pre-seed path
-# written by /forge:do (cleanup_seeded_feature).
+# orphan predicate stays in lock-step with health.py.  The set covers BOTH the
+# refine-tier path (cleanup_orphan_feature) AND the focused/standard pre-seed
+# path written by /forge:do (cleanup_seeded_feature).
 
 
 def _orphan_conditions_met(folder: Path) -> bool:  # noqa: PLR0911
@@ -210,9 +209,9 @@ def _orphan_conditions_met(folder: Path) -> bool:  # noqa: PLR0911
       2. state.json.commits == [].
       3. Folder contents are a strict subset of _ORPHAN_FEATURE_FILES.
 
-    Generalized in M3 P6.1 T0.5 to cover both the P5 refine-tier seed (used
-    by cleanup_orphan_feature) and the P6.1 focused/standard /forge:do
-    pre-seed (used by cleanup_seeded_feature).  Does NOT raise on I/O
+    Generalized to cover both the refine-tier seed (used by
+    cleanup_orphan_feature) and the focused/standard /forge:do pre-seed
+    (used by cleanup_seeded_feature).  Does NOT raise on I/O
     failures — returns False so callers treat a broken state.json as a
     non-orphan (safe default).  The defensive predicate is intentionally a
     flat sequence of independent guards (PLR0911 silenced): each early-return
@@ -347,7 +346,7 @@ def cleanup_seeded_feature(repo_root: Path, feature_id: str) -> bool:
     contents subset of ``_ORPHAN_FEATURE_FILES``), same race-narrowing
     recheck, same ``shutil.rmtree``, but stderr WARN messages name
     ``cleanup_seeded_feature`` so log lines point at the actual entry point
-    used by the focused / standard tier seed-cancel cleanup path (M3 P6.1).
+    used by the focused / standard tier seed-cancel cleanup path.
 
     Args:
         repo_root: Repository root containing the ``.forge/`` tree.

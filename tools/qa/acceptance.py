@@ -40,7 +40,7 @@ from tools.validate._frontmatter import _read_text, _strip_code
 PromiseSource = Literal["acceptance", "scenario", "intent"]
 PromiseStatus = Literal["met", "partial", "not_met", "skipped"]
 ArtifactKind = Literal["cli", "library", "service", "ui", "other"]
-AcceptanceVerdict = Literal["delivers", "partial", "does_not_deliver"]
+AcceptanceVerdict = Literal["delivers", "partial", "does-not-deliver"]
 
 _DEFAULT_RUNNER_OBSERVATION = "no acceptance runner configured"
 _MISSING_PROMISE_OBSERVATION = "runner returned no result for this promise"
@@ -136,7 +136,7 @@ class AcceptanceResult:
 
     Attributes:
         verdict: ``delivers`` when every promise is ``met``;
-            ``does_not_deliver`` when any promise is ``not_met``; ``partial``
+            ``does-not-deliver`` when any promise is ``not_met``; ``partial``
             for any other mix (e.g. mix of ``met`` / ``partial`` / ``skipped``
             with no ``not_met``).
         promises_checked: Total number of promises extracted from SPEC.md.
@@ -276,7 +276,7 @@ def _aggregate_verdict(checks: list[PromiseCheck]) -> AcceptanceVerdict:
     if not checks:
         return "partial"
     if any(c.status == "not_met" for c in checks):
-        return "does_not_deliver"
+        return "does-not-deliver"
     if all(c.status == "met" for c in checks):
         return "delivers"
     return "partial"

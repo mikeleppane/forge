@@ -170,7 +170,7 @@ def test_run_acceptance_one_not_met_does_not_deliver(tmp_path: Path) -> None:
 
     result = run_acceptance(tmp_path, feature_id, artifact, runner=runner)
 
-    assert result.verdict == "does_not_deliver"
+    assert result.verdict == "does-not-deliver"
     assert result.promises_met < result.promises_checked
 
 

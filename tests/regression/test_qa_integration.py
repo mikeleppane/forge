@@ -348,7 +348,7 @@ def test_qa_integration_acceptance_failure_does_not_deliver(tmp_path: Path) -> N
         grepper=_grep_no_matches,
     )
 
-    assert acceptance_result.verdict == "does_not_deliver", acceptance_result
+    assert acceptance_result.verdict == "does-not-deliver", acceptance_result
     assert acceptance_result.promises_met < acceptance_result.promises_checked
 
     qa_path = tmp_path / ".forge" / "features" / FEATURE_ID / "QA.md"

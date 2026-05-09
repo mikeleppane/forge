@@ -178,13 +178,9 @@ def test_read_events_raises_on_malformed_jsonl(tmp_path: Path) -> None:
         read_events(tmp_path, "2026-05-08-foo")
 
 
-def test_append_event_no_network_calls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_append_event_no_network_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*args: object, **kwargs: object) -> None:
-        raise AssertionError(
-            "feature_log opened a socket — module must be local-file I/O only"
-        )
+        raise AssertionError("feature_log opened a socket — module must be local-file I/O only")
 
     monkeypatch.setattr(socket, "socket", _boom)
 

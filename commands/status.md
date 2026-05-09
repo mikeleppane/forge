@@ -33,6 +33,11 @@ where `X` is `state.json.routing.refine_attempts` (defaulting to `0` when
 the field is not yet set). The cap matches the Socratic-loop ceiling
 enforced by `tools.state.increment_refine_attempts` (`_REFINE_ATTEMPTS_CAP`).
 
+**Local-only logs.** Every feature accumulates a JSONL event log at
+`.forge/logs/<feature_id>.jsonl`. The log is local-only — gitignored,
+never sent over the network. Inspect it with
+`cat .forge/logs/<feature_id>.jsonl | jq` or any JSONL tool.
+
 ## Failure modes
 
 - No active feature → `StateError`.

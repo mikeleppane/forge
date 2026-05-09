@@ -233,9 +233,9 @@ def test_qa_shape_high_confidence_allows_nr_regrep_skipped(tmp_path: Path) -> No
         ),
     )
     findings = validate_qa_shape(tmp_path, FEATURE_ID)
-    assert not any(
-        "qa_shape:confidence_aggregation_mismatch" in f.message for f in findings
-    ), findings
+    assert not any("qa_shape:confidence_aggregation_mismatch" in f.message for f in findings), (
+        findings
+    )
 
 
 def test_qa_shape_invalid_section_status_blocks(tmp_path: Path) -> None:

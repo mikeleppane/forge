@@ -303,8 +303,7 @@ def test_append_event_invokes_single_write_per_event(
     append_event(tmp_path, _event())
 
     assert len(write_calls) == 1, (
-        f"expected exactly one write per append_event; got "
-        f"{len(write_calls)}: {write_calls!r}"
+        f"expected exactly one write per append_event; got {len(write_calls)}: {write_calls!r}"
     )
     assert write_calls[0].endswith("\n"), write_calls[0]
 

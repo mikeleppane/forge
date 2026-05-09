@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 import pytest
 
-import tools.archive as archive_mod
 from tools.archive import (
     ArchiveError,
     ConflictRow,
@@ -132,7 +131,7 @@ def test_promote_missing_domain_md_raises(tmp_path: Path) -> None:
     feature_dir = tmp_path / ".forge" / "features" / feature_id
     feature_dir.mkdir(parents=True)
 
-    with pytest.raises(ArchiveError, match="DOMAIN.md missing"):
+    with pytest.raises(ArchiveError, match=r"DOMAIN\.md missing"):
         promote_domain_to_repo(tmp_path, feature_id)
 
 
@@ -148,9 +147,11 @@ def test_promote_atomic_write_no_partial(tmp_path: Path) -> None:
     )
     glossary_path = _seed_repo_glossary(tmp_path, original)
 
-    with patch.object(archive_mod.os, "replace", side_effect=OSError("disk full")):
-        with pytest.raises(OSError, match="disk full"):
-            promote_domain_to_repo(tmp_path, feature_id)
+    with (
+        patch("tools.archive.os.replace", side_effect=OSError("disk full")),
+        pytest.raises(OSError, match="disk full"),
+    ):
+        promote_domain_to_repo(tmp_path, feature_id)
 
     # File untouched on disk.
     assert glossary_path.read_text(encoding="utf-8") == original

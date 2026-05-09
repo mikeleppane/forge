@@ -18,6 +18,10 @@ Run the FORGE ship phase against the active feature.
   `pre_archive_hook`. On success, prints the canonical path, archive
   path, and the two retained snapshots. On `ArchiveError`, surfaces the
   error and exits without retry.
+- `--promote-domain` — full-tier only. Merge this feature's `DOMAIN.md`
+  glossary into the repo-wide `.forge/domain/glossary.md` before
+  archiving. Conflicts (duplicate term with diverging definition) abort
+  the ship; resolve the repo glossary manually and retry.
 
 ## Behavior
 

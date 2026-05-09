@@ -8,9 +8,15 @@ disable-model-invocation: true
 
 ## Mode selection
 
-`/forge:ship` accepts an optional `--change <change_id>` flag.
+`/forge:ship` accepts two optional flags:
 
-- **Without `--change`** — feature ship (default). Run the existing
+- `--change <change_id>` — delta-merge mode (see below).
+- `--promote-domain` — full-tier only, opt-in repo-wide glossary
+  promotion (see "Optional: repo-wide glossary promotion" below).
+
+Behaviour by flag:
+
+- **Without flags** — feature ship (default). Run the existing
   feature-ship lifecycle below: validate phase=ship, parse REVIEW.code.md,
   apply Constitution gate, call `tools.archive.ship_feature`. This is the
   M2/M3-P3 path; no behaviour change.
@@ -18,6 +24,30 @@ disable-model-invocation: true
   lifecycle and dispatch to the delta-merge subroutine below. The
   Constitution gate (P3 §5.3.9) does NOT apply — there is no feature
   folder, no REVIEW.code.md, no `articles[]` to surface.
+- **With `--promote-domain`** — feature-ship lifecycle still runs, but
+  the repo-wide glossary promotion step fires before the archive call so
+  a conflict cannot leave a half-shipped feature.
+
+## Optional: repo-wide glossary promotion (`--promote-domain`)
+
+When the user invokes `/forge:ship --promote-domain` AND
+`state.json.tier == "full"` AND
+`.forge/features/<id>/DOMAIN.md` exists, run this step BEFORE the existing
+archive call (i.e., before step 4 below):
+
+1. Call
+   `tools.archive.promote_domain_to_repo(repo_root, feature_id)`.
+2. **On success**, surface the count of promoted and skipped terms (e.g.
+   `Promoted 2 term(s); skipped 1 term(s) already in repo glossary.`).
+   Continue with the rest of the ship lifecycle.
+3. **On `ArchiveError`** raised by conflicts (`glossary conflicts:
+   <term1>, <term2>, ...`), abort the ship phase and print the conflict
+   list. The user must resolve the repo-wide glossary manually before
+   retrying. No state mutation has occurred.
+
+If the flag is set but the tier is not `full` or the feature has no
+`DOMAIN.md`, surface a single-line notice and continue without promotion;
+do not abort the ship.
 
 ## Mode: delta merge (`--change <id>`)
 

@@ -50,16 +50,29 @@ def test_slug_from_idea_cjk_input_raises_archive_error() -> None:
 
 
 def test_slug_from_idea_only_stopwords_raises_archive_error() -> None:
+    """L2: input had tokens but all were filtered as stopwords/too-short.
+    The error message must differentiate from the empty-input path."""
     text = "the of a in"
     with pytest.raises(ArchiveError) as exc_info:
         slug_from_idea(text)
-    assert text in str(exc_info.value)
+    msg = str(exc_info.value)
+    assert text in msg
+    assert "all tokens filtered as stopwords or too short" in msg, (
+        "L2: stopwords-only input must surface the differentiated error"
+    )
 
 
 def test_slug_from_idea_empty_string_raises_archive_error() -> None:
+    """L2: actually-empty input keeps the legacy 'is empty:' phrasing
+    so callers grepping for either message stay backward-compatible.
+    """
     with pytest.raises(ArchiveError) as exc_info:
         slug_from_idea("")
-    assert str(exc_info.value).startswith("slug computed from idea is empty:")
+    msg = str(exc_info.value)
+    assert msg.startswith("slug computed from idea is empty:")
+    # The 'tokens filtered' diagnostic must NOT appear when input was actually
+    # empty — that wording is reserved for the all-tokens-filtered path.
+    assert "all tokens filtered" not in msg
 
 
 # ---------------------------------------------------------------------------

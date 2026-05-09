@@ -156,10 +156,18 @@ def slug_from_idea(text: str, *, max_words: int = 5) -> str:
         if len(distinct) == max_words:
             break
     slug = "-".join(distinct)
-    # Validate final slug matches the schema-aligned pattern
-    if not slug or not _CAPABILITY_SLUG_SCHEMA_RE.fullmatch(slug):
-        if not slug:
-            raise ArchiveError(f"slug computed from idea is empty: {text}")
+    # Validate final slug matches the schema-aligned pattern.  L2 splits the
+    # empty-slug failure into two paths so the operator can tell whether the
+    # input had no tokens at all (empty / whitespace) versus tokens that all
+    # got filtered as stopwords or too-short.
+    if not slug:
+        if tokens:
+            raise ArchiveError(
+                f"slug computed from idea is empty (all tokens filtered as "
+                f"stopwords or too short, min token length {_SLUG_MIN_TOKEN_LEN}): {text}"
+            )
+        raise ArchiveError(f"slug computed from idea is empty: {text}")
+    if not _CAPABILITY_SLUG_SCHEMA_RE.fullmatch(slug):
         raise ArchiveError(f"slug computed from idea is too short: {slug} ({text})")
     return slug
 

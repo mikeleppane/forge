@@ -21,7 +21,12 @@ Either:
 
 ## Steps
 
-The per-task subagent dispatch's `# Steps` section MUST embed the RED→GREEN→REFACTOR scaffold defined in [forge-tdd](../forge-tdd/SKILL.md); that skill is the single source of truth for the green-bisectable TDD discipline this orchestrator enforces.
+The per-task subagent dispatch's `# Steps` section MUST embed the
+RED→TEST-COMMIT→IMPL-COMMIT scaffold defined between the
+`<!-- scaffold:begin -->` / `<!-- scaffold:end -->` markers in
+[forge-tdd](../forge-tdd/SKILL.md). That skill is the single source of
+truth for the TDD-pairing discipline this orchestrator enforces; copy the
+text verbatim into the dispatch prompt.
 
 1. **Validate tier and state.** Read `state.json`. For `tier in ("standard", "full")`, require PLAN.md with `status: ready`, `REVIEW.plan.md` with `target: plan` and `status: resolved`, and `"plan"` recorded in `phases.review.targets_done` (the gate's audit trail). The review phase will be `status: in_progress` at this point — that is expected; do not abort.
 2. **Transition state.** Call `tools.state.start_phase(path, "execute")` (idempotent if already in_progress). For standard/full, this changes `current_phase` from `review` to `execute` while leaving `phases.review` untouched so the plan-pass audit (`targets_done`, `current_target`) survives until the second review pass completes.
@@ -33,8 +38,8 @@ The per-task subagent dispatch's `# Steps` section MUST embed the RED→GREEN→
 3a. Derive a one-slice plan in memory. List all acceptance criteria as the slice's wave 1 tasks. Do NOT write a PLAN.md.
 3b. Dispatch ONE execute subagent per the M1 focused-tier behavior:
    - Budget: SPEC § [Intent, Codebase Anchors, Scope, Scenarios, Acceptance, Negative Requirements]; `files_in_scope` = union of Codebase Anchors paths.
-   - Budget MUST also include `phase: "execute"` (literal) so the PreToolUse hook applies the TDD-pair check, and `tests_in_scope: string[]` listing the test files this dispatch creates or modifies (drives the validator's pairing check). When a paired test genuinely does not fit, set `tdd_exception_ref` to the matching ADR id from `decisions.md` (recorded as a `## TDD Exception: <AC-id>` heading) — only then may `tests_in_scope` be empty.
-   - Task: implement each acceptance criterion via TDD per [forge-tdd](../forge-tdd/SKILL.md); embed that skill's RED→GREEN→REFACTOR scaffold in the dispatched subagent's `# Steps`.
+   - Budget MUST also include `phase: "execute"` (literal) so the PreToolUse hook applies the TDD-pair check, and `tests_in_scope: string[]` listing the test files this dispatch creates or modifies (drives the validator's pairing check). When a paired test genuinely does not fit, set `tdd_exception_ref` to the matching ADR id from `decisions.md` (recorded as a `## TDD Exception: <AC-id>` heading with `Rationale`, `Reviewer`, and `Date` keys) — only then may `tests_in_scope` be empty.
+   - Task: implement each acceptance criterion via TDD per [forge-tdd](../forge-tdd/SKILL.md); embed that skill's `<!-- scaffold:begin -->` / `<!-- scaffold:end -->` block verbatim in the dispatched subagent's `# Steps`.
 3c. Append summary to `.forge/features/<id>/slice-1.summary`. Append commit shas to `state.commits[]` with the schema-required fields only — `{ "sha": "...", "phase": "execute", "subject": "...", "logged_at": "..." }`. Slice membership lives in `slice-<N>.summary`, not in `state.commits[]` (the schema rejects extra keys).
 
 ### Standard / Full branch (M2)
@@ -50,8 +55,8 @@ The per-task subagent dispatch's `# Steps` section MUST embed the RED→GREEN→
      - `read_only_files`: files the task reads but does not modify.
      - `prior_summaries`: slice summaries from prior slices (always); prior task summaries from THIS slice (only when needed).
      - `articles`: filtered Constitution articles (empty list when `.forge/CONSTITUTION.md` is absent).
-     - `tests_in_scope`: the test files this task creates or modifies — drives the validator's pairing check. The dispatched subagent's `# Steps` MUST embed the [forge-tdd](../forge-tdd/SKILL.md) RED→GREEN→REFACTOR scaffold against these test files.
-     - `tdd_exception_ref` (optional): an ADR id from `decisions.md` recorded as a `## TDD Exception: <AC-id>` heading. Only with this set may `tests_in_scope` be empty; the rationale lives in the ADR.
+     - `tests_in_scope`: the test files this task creates or modifies — drives the validator's pairing check. The dispatched subagent's `# Steps` MUST embed the [forge-tdd](../forge-tdd/SKILL.md) `<!-- scaffold:begin -->` / `<!-- scaffold:end -->` block verbatim against these test files.
+     - `tdd_exception_ref` (optional): an ADR id from `decisions.md` recorded as a `## TDD Exception: <AC-id>` heading with `Rationale`, `Reviewer`, and `Date` keys. Only with this set may `tests_in_scope` be empty; the rationale lives in the ADR.
    - Receive subagent summary (≤500 words). Append commit shas to `state.commits[]` with the schema-required fields only — `{ "sha": "...", "phase": "execute", "subject": "...", "logged_at": "..." }`. **Do NOT add a `slice` key** — `state.schema.json` enforces `additionalProperties: false` on `commits[]` and the write will be rejected. Record slice membership in `slice-<N>.summary` instead.
 3e. After each slice completes:
    - Write `.forge/features/<id>/slice-<N>.summary` with the aggregated wave outputs.

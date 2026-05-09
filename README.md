@@ -20,7 +20,7 @@ FORGE optimizes for **disciplined, resumable** software work over speed-first co
 
 ## What it is
 
-A small set of slash commands, skills, hooks, and JSON-schema-validated artifacts that walk an AI coding agent through twelve phases — from a vague idea through verified, shipped, and QA'd change. State is persisted on disk per feature, so any session can be paused, resumed, or handed off without losing context.
+A small set of slash commands, skills, hooks, and JSON-schema-validated artifacts that walk an AI coding agent through up to twelve phases — from a vague idea to a verified change (focused tier) and on through ship + QA (standard / full tiers). State is persisted on disk per feature, so any session can be paused, resumed, or handed off without losing context.
 
 ## Why use it
 
@@ -84,11 +84,11 @@ Phases can be skipped via flags or selected automatically by `/forge:do`, which 
 
 | Tier | Phases | Use when |
 | --- | --- | --- |
-| `--focused` | `spec → execute → verify → ship → qa` | One-file fixes, surgical changes, well-understood bugs |
+| `--focused` | `spec → execute → verify` | One-file fixes, surgical changes, well-understood bugs |
 | `--standard` | `spec → scenarios → plan → crucible → review → execute → review → verify → ship → qa` | Most features; cross-file changes; non-trivial behavior |
 | `--full` | entire pipeline through `qa` | New subsystems, cross-cutting refactors, anything requiring deep research and DDD |
 
-The standard tier runs review twice (against `PLAN.md`, then against the code diff). Every tier ends in `qa`. The `forge-context-budget` and `forge-subagent-dispatch` skills enforce per-subagent token budgets at every dispatch; `tools.validate.tdd_evidence` enforces paired test/impl commits in execute; `tools.validate.qa_shape` enforces the QA artifact contract on ship/qa exit.
+The standard tier runs review twice (against `PLAN.md`, then against the code diff). Focused finishes at `verify` (no ship, no qa — `/forge:ship` aborts on focused); standard and full both end in `qa`. The `forge-context-budget` and `forge-subagent-dispatch` skills enforce per-subagent token budgets at every dispatch; `tools.validate.tdd_evidence` enforces paired test/impl commits in execute; `tools.validate.qa_shape` enforces the QA artifact contract on ship/qa exit.
 
 ---
 
@@ -150,7 +150,7 @@ Every FORGE feature lives in `.forge/features/<id>/` with a small set of contrac
 - `QA.md` — fresh-outsider black-box acceptance record (verdict + confidence + four sections)
 - `decisions.md` — running log of decisions and rationale (includes TDD Exception ADRs and QA Override ADRs)
 - `state.json` — phase / slice / wave state for resumption (carries `flow_version: 3` for v3 features)
-- `.forge/logs/<feature_id>.jsonl` — local-only event log; gitignored, never sent over the network
+- `.forge/logs/<feature_id>.jsonl` — optional local-only event log written via `tools.feature_log` when callers append events; gitignored, never sent over the network
 
 Canonical capability specs live in `.forge/specs/<capability>/SPEC.md`. Feature specs are working artifacts and are merged or archived against canonical specs at ship time. Changes to shipped capabilities flow through OpenSpec-style delta proposals under `.forge/changes/<id>/proposal.md` via `/forge:change`.
 

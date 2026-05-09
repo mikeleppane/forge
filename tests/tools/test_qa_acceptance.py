@@ -154,9 +154,7 @@ def test_run_acceptance_one_not_met_does_not_deliver(tmp_path: Path) -> None:
     _write_spec(tmp_path, feature_id, SPEC_FULL)
     artifact = ArtifactDescriptor(kind="cli", identifier="mytool")
 
-    def runner(
-        a: ArtifactDescriptor, promises: list[SpecPromise]
-    ) -> list[PromiseCheck]:
+    def runner(a: ArtifactDescriptor, promises: list[SpecPromise]) -> list[PromiseCheck]:
         out: list[PromiseCheck] = []
         for index, p in enumerate(promises):
             status = "not_met" if index == 0 else "met"
@@ -181,9 +179,7 @@ def test_run_acceptance_partial_with_skipped_returns_partial(tmp_path: Path) -> 
     _write_spec(tmp_path, feature_id, SPEC_FULL)
     artifact = ArtifactDescriptor(kind="library", identifier="myproject.core")
 
-    def runner(
-        a: ArtifactDescriptor, promises: list[SpecPromise]
-    ) -> list[PromiseCheck]:
+    def runner(a: ArtifactDescriptor, promises: list[SpecPromise]) -> list[PromiseCheck]:
         statuses = ["met", "partial", "skipped"]
         out: list[PromiseCheck] = []
         for index, p in enumerate(promises):
@@ -229,9 +225,7 @@ def test_run_acceptance_runner_missing_promise_id_marked_skipped(tmp_path: Path)
     _write_spec(tmp_path, feature_id, SPEC_FULL)
     artifact = ArtifactDescriptor(kind="cli", identifier="mytool")
 
-    def partial_runner(
-        a: ArtifactDescriptor, promises: list[SpecPromise]
-    ) -> list[PromiseCheck]:
+    def partial_runner(a: ArtifactDescriptor, promises: list[SpecPromise]) -> list[PromiseCheck]:
         # Only return results for the first two promises; rest must be auto-skipped.
         return [
             PromiseCheck(
@@ -270,9 +264,7 @@ def test_run_acceptance_artifact_descriptor_passed_to_runner_unchanged(
 
     seen: list[ArtifactDescriptor] = []
 
-    def runner(
-        a: ArtifactDescriptor, promises: list[SpecPromise]
-    ) -> list[PromiseCheck]:
+    def runner(a: ArtifactDescriptor, promises: list[SpecPromise]) -> list[PromiseCheck]:
         seen.append(a)
         return [
             PromiseCheck(
@@ -293,7 +285,7 @@ def test_run_acceptance_artifact_descriptor_passed_to_runner_unchanged(
 
 def test_artifact_descriptor_supports_arbitrary_kinds() -> None:
     for kind in ("cli", "library", "service", "ui", "other"):
-        descriptor = ArtifactDescriptor(kind=kind, identifier="opaque-id")  # type: ignore[arg-type]
+        descriptor = ArtifactDescriptor(kind=kind, identifier="opaque-id")
         assert descriptor.kind == kind
         assert descriptor.identifier == "opaque-id"
         assert descriptor.notes == ""
@@ -304,9 +296,7 @@ def test_run_acceptance_check_order_matches_promise_order(tmp_path: Path) -> Non
     _write_spec(tmp_path, feature_id, SPEC_FULL)
     artifact = ArtifactDescriptor(kind="cli", identifier="mytool")
 
-    def runner(
-        a: ArtifactDescriptor, promises: list[SpecPromise]
-    ) -> list[PromiseCheck]:
+    def runner(a: ArtifactDescriptor, promises: list[SpecPromise]) -> list[PromiseCheck]:
         # Return in REVERSE order — module must reorder to input promise order.
         return [
             PromiseCheck(

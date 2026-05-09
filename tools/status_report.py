@@ -1,11 +1,18 @@
 """Structured status report builder + markdown renderer for /forge:status.
 
-Two pure functions: ``build_status_report`` consumes a parsed state.json
-payload and a list of validator findings; ``render_status_report`` turns the
-returned ``StatusReport`` dataclass into a markdown document. Neither
-function performs disk I/O or subprocess work — the caller (the
-forge-status skill orchestrator) is responsible for reading state.json,
-running validators, and printing the result.
+Two pure functions plus a CLI entry point. ``build_status_report`` consumes
+a parsed state.json payload and a list of validator findings;
+``render_status_report`` turns the returned ``StatusReport`` dataclass into
+a markdown document. Neither function performs disk I/O or subprocess work
+— the caller is responsible for reading state.json, running validators,
+and printing the result.
+
+The CLI ``main`` (invoked via ``python -m tools.status_report``) glues the
+pieces: resolves the active feature, calls per-feature validators
+in-process (scoped by ``feature_id`` so cross-feature findings do not leak
+into a single feature's report), builds the report, and prints the
+rendered markdown. Keeping the orchestration in Python avoids the brittle
+shell+JSON contract a SKILL.md-driven implementation would otherwise need.
 
 The next-command lookup defers to ``tools.state.next_phase_command`` so
 the status report and the rest of the lifecycle agree on tier+phase
@@ -16,11 +23,21 @@ the report renders an em-dash.
 
 from __future__ import annotations
 
+import argparse
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from tools.state import next_phase_command
-from tools.validate._finding import Finding
+from tools.state import find_active_feature, next_phase_command, read_state
+from tools.validate import (
+    EXIT_NONZERO_SEVERITIES,
+    Finding,
+    validate_domain_glossary,
+    validate_health,
+    validate_qa_shape,
+    validate_tdd_evidence,
+)
 
 _DEFAULT_FLOW_VERSION = 1
 _RECENT_COMMITS_CAP = 5
@@ -57,8 +74,10 @@ class StatusReport:
             phases entry is missing.
         flow_version: State machine generation (1, 2, or 3). Defaults to 1
             when the field is absent (see schemas/state.schema.json).
-        recent_commits: Up to 5 commits sorted by logged_at descending.
-        open_blocks: BLOCK-severity findings, in the order supplied.
+        recent_commits: Up to 5 commits, last in insertion order, reversed
+            so the most-recent commit is first.
+        open_blocks: BLOCK + HIGH severity findings (per
+            ``EXIT_NONZERO_SEVERITIES``), in the order supplied.
         next_command: Slash command to invoke next, or ``None`` at terminal.
     """
 
@@ -70,12 +89,6 @@ class StatusReport:
     recent_commits: list[CommitSummary]
     open_blocks: list[Finding]
     next_command: str | None
-
-
-def _commit_logged_at(commit: dict[str, Any]) -> str:
-    """Sort key — empty string sorts before any RFC 3339 timestamp."""
-    value = commit.get("logged_at")
-    return value if isinstance(value, str) else ""
 
 
 def _commit_summary(commit: dict[str, Any]) -> CommitSummary:
@@ -97,12 +110,14 @@ def build_status_report(
     """Assemble a ``StatusReport`` from a state.json payload + validator findings.
 
     Pure function: no disk I/O, no subprocess, no time lookup. Recent
-    commits are capped at ``_RECENT_COMMITS_CAP`` and sorted descending by
-    ``logged_at``. Open blocks are filtered to ``severity == "BLOCK"`` with
-    input order preserved (downstream rendering relies on the order
-    matching validator output). The next command is resolved by
-    ``tools.state.next_phase_command`` so the routing tables stay
-    centralised.
+    commits are capped at ``_RECENT_COMMITS_CAP`` and taken from the tail
+    of ``state.commits[]`` (canonical insertion order; see
+    ``tools/validate/tdd_evidence.py`` module docstring) then reversed for
+    most-recent-first display. Open blocks are filtered to severities in
+    ``EXIT_NONZERO_SEVERITIES`` (BLOCK + HIGH) with input order preserved
+    so downstream rendering matches validator output. The next command is
+    resolved by ``tools.state.next_phase_command`` so the routing tables
+    stay centralised.
 
     Args:
         state_payload: Parsed state.json dict.
@@ -137,10 +152,15 @@ def build_status_report(
     commits_list: list[dict[str, Any]] = (
         [c for c in raw_commits if isinstance(c, dict)] if isinstance(raw_commits, list) else []
     )
-    sorted_commits = sorted(commits_list, key=_commit_logged_at, reverse=True)
-    recent_commits = [_commit_summary(c) for c in sorted_commits[:_RECENT_COMMITS_CAP]]
+    # Insertion order in ``state.commits[]`` is the canonical chronology
+    # (see ``tools/validate/tdd_evidence.py`` module docstring) — second
+    # precision in ``logged_at`` collides on fast-batched commits, so a
+    # timestamp sort would silently keep the oldest five out of a tie. Take
+    # the last ``_RECENT_COMMITS_CAP`` as authored, then reverse for
+    # most-recent-first display.
+    recent_commits = [_commit_summary(c) for c in reversed(commits_list[-_RECENT_COMMITS_CAP:])]
 
-    open_blocks = [f for f in findings if f.severity == "BLOCK"]
+    open_blocks = [f for f in findings if f.severity in EXIT_NONZERO_SEVERITIES]
 
     next_command = next_phase_command(state_payload)
 
@@ -156,9 +176,13 @@ def build_status_report(
     )
 
 
-def _escape_pipes(value: str) -> str:
-    """Escape ``|`` so a 3-column markdown table row stays parseable."""
-    return value.replace("|", r"\|")
+def _table_safe(value: str) -> str:
+    """Escape pipes and collapse line breaks so a 3-column markdown row stays parseable.
+
+    Conventional Commits forbids subject newlines but nothing on the
+    write path actively rejects them — defensive escape.
+    """
+    return value.replace("\r", " ").replace("\n", " ").replace("|", r"\|")
 
 
 def _render_commits_table(commits: list[CommitSummary]) -> list[str]:
@@ -170,9 +194,9 @@ def _render_commits_table(commits: list[CommitSummary]) -> list[str]:
         lines.append("| — | — | — |")
         return lines
     lines.extend(
-        f"| {_escape_pipes(commit.sha_short)} "
-        f"| {_escape_pipes(commit.phase)} "
-        f"| {_escape_pipes(commit.subject)} |"
+        f"| {_table_safe(commit.sha_short)} "
+        f"| {_table_safe(commit.phase)} "
+        f"| {_table_safe(commit.subject)} |"
         for commit in commits
     )
     return lines
@@ -219,9 +243,84 @@ def render_status_report(report: StatusReport) -> str:
     return "\n".join([*header_lines, *commits_lines, *blocks_lines])
 
 
+def gather_findings(repo_root: Path, feature_id: str) -> list[Finding]:
+    """Run validators relevant to a single feature's status report.
+
+    Per-feature semantic validators are scoped by ``feature_id`` so
+    findings for unrelated features never leak into this feature's
+    report. ``validate_health`` is repo-wide on purpose — its findings
+    (capability collisions, malformed manifests) affect every feature
+    and operators want to see them.
+
+    Args:
+        repo_root: Repository root containing the ``.forge/`` tree.
+        feature_id: Feature whose semantic validators should run.
+
+    Returns:
+        Concatenated findings list, validator order preserved
+        (health → tdd_evidence → qa_shape → domain_glossary).
+    """
+    findings: list[Finding] = []
+    findings.extend(validate_health(repo_root))
+    findings.extend(validate_tdd_evidence(repo_root, feature_id))
+    findings.extend(validate_qa_shape(repo_root, feature_id))
+    findings.extend(validate_domain_glossary(repo_root, feature_id))
+    return findings
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m tools.status_report`` entry point for ``/forge:status --report``.
+
+    Resolves the active feature via ``tools.state.find_active_feature``,
+    reads its ``state.json``, gathers per-feature findings via
+    :func:`gather_findings`, builds the report, and prints the rendered
+    markdown to stdout. Returns 0 on success, 1 when the active feature
+    cannot be resolved (the operator's normal recovery path is to pass
+    ``--feature <id>`` explicitly).
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m tools.status_report",
+        description="Render the structured status report for a feature.",
+    )
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path.cwd(),
+        help="Repository root containing the .forge/ tree (default: cwd).",
+    )
+    parser.add_argument(
+        "--feature",
+        type=str,
+        default=None,
+        help="Explicit feature id; falls back to the single active feature.",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        feature_dir = find_active_feature(args.repo_root, args.feature)
+    except Exception as exc:  # state.StateError or filesystem-level errors
+        print(f"status-report: cannot resolve active feature: {exc}", file=sys.stderr)
+        return 1
+
+    state_path = feature_dir / "state.json"
+    state_payload = read_state(state_path)
+    feature_id = feature_dir.name
+
+    findings = gather_findings(args.repo_root, feature_id)
+    report = build_status_report(state_payload, findings, feature_id=feature_id)
+    print(render_status_report(report))
+    return 0
+
+
 __all__ = [
     "CommitSummary",
     "StatusReport",
     "build_status_report",
+    "gather_findings",
+    "main",
     "render_status_report",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

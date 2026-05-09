@@ -49,6 +49,116 @@ _REFINE_ATTEMPTS_CAP: Final[int] = 5
 _FLOW_VERSION_V3: Final[int] = 3
 
 
+# Canonical per-tier phase orderings, sourced from spec sections 6.1-6.3
+# (`docs/specs/2026-05-09-m8-research-and-cross-ai-design.md`). The full-tier
+# list carries the post-ship ``qa`` step only when the feature is at
+# ``flow_version >= 3``; v1/v2 stop at ``ship`` per spec line 730. Standard
+# tier intentionally omits ``research``: research is opt-in via
+# ``/forge:do --research`` (which writes ``routing.phase_list`` explicitly),
+# so the lazy default for legacy standard features is the no-research list.
+_PHASE_LIST_FOCUSED: Final[tuple[str, ...]] = ("spec", "execute", "verify")
+_PHASE_LIST_STANDARD: Final[tuple[str, ...]] = (
+    "spec",
+    "scenarios",
+    "plan",
+    "crucible",
+    "review",
+    "execute",
+    "verify",
+    "ship",
+)
+_PHASE_LIST_FULL_PRE_V3: Final[tuple[str, ...]] = (
+    "refine",
+    "research",
+    "spec",
+    "domain",
+    "scenarios",
+    "plan",
+    "crucible",
+    "review",
+    "execute",
+    "verify",
+    "ship",
+)
+_PHASE_LIST_FULL_V3: Final[tuple[str, ...]] = (*_PHASE_LIST_FULL_PRE_V3, "qa")
+
+
+def _derive_phase_list(*, tier: str, flow_version: int | None = None) -> list[str]:
+    """Return the canonical lifecycle phase list for ``(tier, flow_version)``.
+
+    Pure transformation. Does no I/O and reads no payload state. Callers
+    typically reach this via ``get_phase_list`` rather than directly; the
+    only direct caller is the schema-bounded routing seeder.
+
+    Args:
+        tier: One of ``VALID_TIERS``.
+        flow_version: Optional state-machine generation. Absence is treated
+            as v1 by application convention (matches ``read_state``); the
+            full-tier list carries the trailing ``qa`` step only when this
+            is ``>= _FLOW_VERSION_V3``.
+
+    Returns:
+        A fresh ``list[str]`` of lifecycle phase names in execution order.
+
+    Raises:
+        StateError: when ``tier`` is not in ``VALID_TIERS``.
+    """
+    if tier == "focused":
+        return list(_PHASE_LIST_FOCUSED)
+    if tier == "standard":
+        return list(_PHASE_LIST_STANDARD)
+    if tier == "full":
+        if (flow_version or 1) >= _FLOW_VERSION_V3:
+            return list(_PHASE_LIST_FULL_V3)
+        return list(_PHASE_LIST_FULL_PRE_V3)
+    raise StateError(f"unknown tier {tier!r}; must be one of {VALID_TIERS}")
+
+
+def get_phase_list(payload: dict[str, Any]) -> list[str] | None:
+    """Return the canonical phase list for ``payload``, or ``None``.
+
+    Read-only accessor over an already-parsed ``state.json`` payload. Pure:
+    never mutates ``payload`` and never touches the filesystem. Decision 4
+    of the M8 P0 plan: the dict returned by ``read_state`` is **not**
+    augmented with a derived ``phase_list``; callers that need the list
+    reach for it through this accessor instead. That preserves the
+    ``read → mutate → write_state`` round-trip guarantee for legacy
+    features whose on-disk file lacks the field.
+
+    Resolution order:
+
+    1. ``payload['routing']`` is not a dict → ``None``.
+    2. ``payload['routing']['phase_list']`` is a non-empty list → fresh
+       ``list(...)`` copy of it (defensive against caller mutation).
+    3. Otherwise look up ``tier = payload['tier']``; when ``tier`` is in
+       ``VALID_TIERS``, derive the canonical list via
+       ``_derive_phase_list``. Unknown tier (or absent tier) → ``None``.
+
+    Args:
+        payload: Parsed ``state.json`` mapping.
+
+    Returns:
+        Ordered list of lifecycle phase names, or ``None`` when no list
+        can be resolved.
+    """
+    routing = payload.get("routing")
+    if not isinstance(routing, dict):
+        return None
+    explicit = routing.get("phase_list")
+    if isinstance(explicit, list) and explicit:
+        return list(explicit)
+    tier = payload.get("tier")
+    if isinstance(tier, str) and tier in VALID_TIERS:
+        flow_version = payload.get("flow_version")
+        fv = (
+            flow_version
+            if isinstance(flow_version, int) and not isinstance(flow_version, bool)
+            else None
+        )
+        return _derive_phase_list(tier=tier, flow_version=fv)
+    return None
+
+
 def _validator_for(schema: dict[str, Any]) -> jsonschema.Draft202012Validator:
     return jsonschema.Draft202012Validator(
         schema,

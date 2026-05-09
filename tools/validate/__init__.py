@@ -11,6 +11,7 @@ so provenance is preserved across the boundary (P2a follow-up #2, option A).
 
 from ._finding import (
     EXIT_NONZERO_SEVERITIES,
+    MAX_FIX_HINT_LEN,
     Finding,
     Severity,
     ValidationError,
@@ -34,6 +35,7 @@ from .tdd_evidence import validate_tdd_evidence
 
 __all__ = [
     "EXIT_NONZERO_SEVERITIES",
+    "MAX_FIX_HINT_LEN",
     "Finding",
     "Severity",
     "ValidationError",

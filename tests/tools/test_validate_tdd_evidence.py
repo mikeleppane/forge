@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tools import validate
+from tools.validate import MAX_FIX_HINT_LEN
 from tools.validate.tdd_evidence import validate_tdd_evidence
 
 _COMPLETE_ADR_BODY = (
@@ -623,7 +624,9 @@ def test_tdd_evidence_block_findings_carry_fix_hint(tmp_path: Path) -> None:
     assert blocks, "fixture must trigger at least one BLOCK"
     for f in blocks:
         assert f.fix_hint, f"BLOCK finding {f.message!r} missing fix_hint"
-        assert len(f.fix_hint) <= 140, f"fix_hint too long for {f.message!r}: {f.fix_hint!r}"
+        assert len(f.fix_hint) <= MAX_FIX_HINT_LEN, (
+            f"fix_hint too long for {f.message!r}: {f.fix_hint!r}"
+        )
 
 
 def test_tdd_evidence_feature_missing_fix_hint(tmp_path: Path) -> None:

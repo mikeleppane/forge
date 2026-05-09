@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tools import validate
+from tools.validate import MAX_FIX_HINT_LEN
 from tools.validate import cli as validate_cli
 from tools.validate.qa_shape import validate_qa_shape
 
@@ -322,7 +323,7 @@ def test_qa_shape_block_findings_carry_fix_hint(tmp_path: Path) -> None:
     assert blocks, "fixture must trigger at least one BLOCK"
     for f in blocks:
         assert f.fix_hint, f"BLOCK {f.message!r} missing fix_hint"
-        assert len(f.fix_hint) <= 140, f"fix_hint too long: {f.fix_hint!r}"
+        assert len(f.fix_hint) <= MAX_FIX_HINT_LEN, f"fix_hint too long: {f.fix_hint!r}"
 
 
 def test_qa_shape_section_missing_fix_hint_names_section(tmp_path: Path) -> None:

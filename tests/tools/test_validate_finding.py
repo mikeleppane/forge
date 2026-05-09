@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tools import validate
+from tools.validate import MAX_FIX_HINT_LEN
 from tools.validate._finding import _finding_to_dict
 
 
@@ -76,3 +77,31 @@ def test_finding_dict_omits_fix_hint_when_none() -> None:
     )
     payload = _finding_to_dict(finding)
     assert "fix_hint" not in payload
+
+
+def test_finding_fix_hint_over_cap_raises() -> None:
+    """Constructing a Finding with a fix_hint longer than MAX_FIX_HINT_LEN
+    must raise ValidationError so the cap is enforced at the boundary, not
+    only by ad-hoc per-test assertions."""
+    over_cap = "x" * (MAX_FIX_HINT_LEN + 1)
+    with pytest.raises(validate.ValidationError, match="fix_hint exceeds"):
+        validate.Finding(
+            severity="BLOCK",
+            target="tdd_evidence",
+            file=Path(".forge/features/x/state.json"),
+            message="some block",
+            fix_hint=over_cap,
+        )
+
+
+def test_finding_fix_hint_at_cap_succeeds() -> None:
+    """Fix hint exactly at MAX_FIX_HINT_LEN is accepted (boundary)."""
+    exactly_cap = "y" * MAX_FIX_HINT_LEN
+    finding = validate.Finding(
+        severity="BLOCK",
+        target="tdd_evidence",
+        file=Path(".forge/features/x/state.json"),
+        message="some block",
+        fix_hint=exactly_cap,
+    )
+    assert finding.fix_hint == exactly_cap

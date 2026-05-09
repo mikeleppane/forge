@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tools import validate
+from tools.validate import MAX_FIX_HINT_LEN
 from tools.validate.domain_glossary import validate_domain_glossary
 
 _FEATURE_ID = "2026-05-09-glossary-fixture"
@@ -317,7 +318,7 @@ def test_domain_glossary_block_findings_carry_fix_hint(tmp_path: Path) -> None:
     assert blocks, "fixture must trigger at least one BLOCK"
     for f in blocks:
         assert f.fix_hint, f"BLOCK {f.message!r} missing fix_hint"
-        assert len(f.fix_hint) <= 140, f"fix_hint too long: {f.fix_hint!r}"
+        assert len(f.fix_hint) <= MAX_FIX_HINT_LEN, f"fix_hint too long: {f.fix_hint!r}"
 
 
 def test_domain_glossary_orphan_fix_hint_names_term(tmp_path: Path) -> None:

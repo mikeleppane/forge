@@ -15,6 +15,7 @@ REQUIRED_ALL: frozenset[str] = frozenset(
     {
         "EXIT_NONZERO_SEVERITIES",
         "Finding",
+        "MAX_FIX_HINT_LEN",
         "Severity",
         "ValidationError",
         "main",

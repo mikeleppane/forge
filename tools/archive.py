@@ -6,11 +6,13 @@ owns the path math so the LLM cannot misplace shipped artifacts.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import shutil
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -1325,21 +1327,33 @@ def _render_repo_glossary(rows: dict[str, tuple[str, str, str]]) -> str:
 
 
 def _atomic_write_glossary(target: Path, body: str) -> None:
-    """Write ``body`` to ``target`` via a sibling tempfile + ``os.replace``.
+    """Write ``body`` to ``target`` via a uniquely-named sibling tempfile.
 
     Mirrors the contract of ``tools.constitution_amend.atomic_replace`` but
     routes through ``os.replace`` so the test suite can simulate a
     mid-flight rename failure without monkey-patching ``Path.replace``.
+
+    The temp filename is generated with :func:`tempfile.mkstemp` (per-call
+    unique suffix) so two concurrent writers cannot stomp the same staging
+    path. Without uniqueness, writer B's partial content could be replaced
+    over the live target by writer A's ``os.replace``.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(body, encoding="utf-8")
+    fd, tmp_str = tempfile.mkstemp(
+        dir=str(target.parent),
+        prefix=target.name + ".",
+        suffix=".tmp",
+    )
+    os.close(fd)
+    tmp = Path(tmp_str)
     try:
+        tmp.write_text(body, encoding="utf-8")
         # Routed through ``os.replace`` (not ``Path.replace``) so the test
         # suite can simulate a mid-flight rename failure via patch.object.
         os.replace(str(tmp), str(target))  # noqa: PTH105
     except OSError:
-        tmp.unlink(missing_ok=True)
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
         raise
 
 

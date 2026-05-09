@@ -310,6 +310,36 @@ def test_promote_definition_normalization(tmp_path: Path) -> None:
     assert result.conflicts == []
 
 
+def test_promote_uses_unique_temp_filename_per_call(tmp_path: Path) -> None:
+    """Two ``promote_domain_to_repo`` calls must use distinct temp filenames.
+
+    A fixed-name tempfile (e.g. ``glossary.md.tmp``) races between concurrent
+    promotions: two writers stomp the same path, and the second's ``os.replace``
+    can move a half-written file over the live glossary. ``mkstemp`` per call
+    yields a unique sibling temp path so each writer owns its own staging file.
+    """
+    feature_id = "2026-05-09-checkout"
+    _seed_feature_domain(tmp_path, feature_id, _FEATURE_DOMAIN_THREE_TERMS)
+
+    captured_temps: list[str] = []
+
+    real_replace = __import__("os").replace
+
+    def capture(src: str, dst: str) -> None:
+        captured_temps.append(src)
+        real_replace(src, dst)
+
+    with patch("tools.archive.os.replace", side_effect=capture):
+        promote_domain_to_repo(tmp_path, feature_id)
+        promote_domain_to_repo(tmp_path, feature_id)
+
+    assert len(captured_temps) == 2, captured_temps
+    assert captured_temps[0] != captured_temps[1], (
+        f"both promote calls reused the same temp filename {captured_temps[0]!r} — "
+        f"concurrent writers would collide"
+    )
+
+
 def test_conflict_row_dataclass_shape() -> None:
     row = ConflictRow(
         term="Order",

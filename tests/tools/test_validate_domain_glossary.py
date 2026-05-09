@@ -293,6 +293,53 @@ def test_domain_glossary_terms_inside_fenced_block_ignored(tmp_path: Path) -> No
     assert orphan == [], findings
 
 
+def test_domain_glossary_block_findings_carry_fix_hint(tmp_path: Path) -> None:
+    """Every BLOCK from validate_domain_glossary carries a non-empty,
+    length-bounded fix_hint."""
+    feature_dir = _make_feature(tmp_path)
+    _write_spec(
+        feature_dir,
+        "The `Customer` purchases an `Order`.",
+        "Scenario: stub\n  Given a `Customer`\n  When `Order` is placed\n",
+    )
+    _write_domain(
+        feature_dir,
+        [
+            "| Order | An order. | — | — |",
+            "| Order | Duplicate row. | — | — |",
+            "| BadRow |",
+        ],
+    )
+
+    findings = validate_domain_glossary(tmp_path, _FEATURE_ID)
+
+    blocks = [f for f in findings if f.severity == "BLOCK"]
+    assert blocks, "fixture must trigger at least one BLOCK"
+    for f in blocks:
+        assert f.fix_hint, f"BLOCK {f.message!r} missing fix_hint"
+        assert len(f.fix_hint) <= 140, f"fix_hint too long: {f.fix_hint!r}"
+
+
+def test_domain_glossary_orphan_fix_hint_names_term(tmp_path: Path) -> None:
+    """Orphan term hint names the offending term so the operator does not
+    have to cross-reference the message."""
+    feature_dir = _make_feature(tmp_path)
+    _write_spec(
+        feature_dir,
+        "The `Customer` purchases an `Order`.",
+        "Scenario: stub\n  Given a `Customer`\n  When `Order` is placed\n",
+    )
+    _write_domain(
+        feature_dir,
+        ["| Order | An order. | — | — |"],
+    )
+
+    findings = validate_domain_glossary(tmp_path, _FEATURE_ID)
+    orphan = next(f for f in findings if "orphan_term" in f.message)
+    assert orphan.fix_hint is not None
+    assert "Customer" in orphan.fix_hint
+
+
 def test_domain_glossary_cli_target_registered(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

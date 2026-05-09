@@ -585,6 +585,59 @@ def test_tdd_evidence_cli_target_registered(
     assert any(f["severity"] == "BLOCK" for f in payload["findings"])
 
 
+def test_tdd_evidence_block_findings_carry_fix_hint(tmp_path: Path) -> None:
+    """Every BLOCK finding emitted by validate_tdd_evidence carries an
+    actionable, length-bounded fix_hint so the operator can act without
+    reading the validator source."""
+    feature_dir = _make_feature(tmp_path)
+    _write_spec(feature_dir, ac_count=2)
+    _write_state(
+        feature_dir,
+        [
+            {
+                "sha": "1111111",
+                "phase": "execute",
+                "subject": "feat(validate): implement AC-1",
+                "logged_at": "2026-05-08T10:00:00Z",
+            },
+            {
+                "sha": "2222222",
+                "phase": "execute",
+                "subject": "refactor(validate): rename helper",
+                "logged_at": "2026-05-08T10:05:00Z",
+            },
+            {
+                "sha": "3333333",
+                "phase": "execute",
+                "subject": "feat(validate): unmapped AC sneak",
+                "logged_at": "2026-05-08T10:10:00Z",
+            },
+        ],
+    )
+    _write_slice(feature_dir, 1, {"AC-1": ["1111111"], "AC-2": ["2222222"]})
+
+    git_show = _git_show({"2222222": ["tools/foo.py"]})
+    findings = validate_tdd_evidence(tmp_path, "2026-05-08-tdd-fixture", git_show_files=git_show)
+
+    blocks = [f for f in findings if f.severity == "BLOCK"]
+    assert blocks, "fixture must trigger at least one BLOCK"
+    for f in blocks:
+        assert f.fix_hint, f"BLOCK finding {f.message!r} missing fix_hint"
+        assert len(f.fix_hint) <= 140, f"fix_hint too long for {f.message!r}: {f.fix_hint!r}"
+
+
+def test_tdd_evidence_feature_missing_fix_hint(tmp_path: Path) -> None:
+    """The ``feature_missing`` BLOCK names the directory the operator should
+    create or correct."""
+    findings = validate_tdd_evidence(
+        tmp_path, "2026-05-08-does-not-exist", git_show_files=_no_files
+    )
+
+    assert len(findings) == 1
+    assert findings[0].fix_hint is not None
+    assert "2026-05-08-does-not-exist" in findings[0].fix_hint
+
+
 def test_tdd_evidence_cli_target_all_includes_tdd(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

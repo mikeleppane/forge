@@ -300,6 +300,42 @@ def test_qa_shape_evidence_resolves_when_path(tmp_path: Path) -> None:
     assert all("qa_shape:evidence_path_missing" not in f.message for f in findings), findings
 
 
+def test_qa_shape_block_findings_carry_fix_hint(tmp_path: Path) -> None:
+    """Every BLOCK emitted by validate_qa_shape carries an actionable,
+    length-bounded fix_hint."""
+    feature_dir = _make_feature_dir(tmp_path)
+    _write_state(feature_dir)
+    # Pile up several BLOCKs in one fixture: drop a section, mismatch verdict
+    # against acceptance status, and use an invalid section status.
+    _write_qa(
+        feature_dir,
+        _qa_md(
+            verdict="delivers",
+            acceptance_status="partial",
+            confidence="high",
+            adversarial_status="pending",
+            drop_section="NR Regrep",
+        ),
+    )
+    findings = validate_qa_shape(tmp_path, FEATURE_ID)
+    blocks = [f for f in findings if f.severity == "BLOCK"]
+    assert blocks, "fixture must trigger at least one BLOCK"
+    for f in blocks:
+        assert f.fix_hint, f"BLOCK {f.message!r} missing fix_hint"
+        assert len(f.fix_hint) <= 140, f"fix_hint too long: {f.fix_hint!r}"
+
+
+def test_qa_shape_section_missing_fix_hint_names_section(tmp_path: Path) -> None:
+    """The section-missing hint names the section the operator must add."""
+    feature_dir = _make_feature_dir(tmp_path)
+    _write_state(feature_dir)
+    _write_qa(feature_dir, _qa_md(drop_section="NR Regrep"))
+    findings = validate_qa_shape(tmp_path, FEATURE_ID)
+    missing = next(f for f in findings if "qa_shape:section_missing" in f.message)
+    assert missing.fix_hint is not None
+    assert "NR Regrep" in missing.fix_hint
+
+
 def test_qa_shape_cli_target_registered(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     feature_dir = _make_feature_dir(tmp_path)
     _write_state(feature_dir)

@@ -271,3 +271,42 @@ def test_cli_deviations_requires_path(capsys: pytest.CaptureFixture[str]) -> Non
     assert any(
         f["severity"] == "BLOCK" and "folder" in f["message"].lower() for f in payload["findings"]
     ), payload
+
+
+def test_cli_renders_fix_hint_when_present(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When a validator emits a Finding with fix_hint, the CLI JSON payload
+    renders the hint under the ``fix_hint`` key. Findings without a hint
+    keep the dict shape stable (no `fix_hint` key)."""
+
+    def fake_health(repo_root: Path) -> list[validate.Finding]:
+        return [
+            validate.Finding(
+                severity="BLOCK",
+                target="health",
+                file=repo_root / "made-up.md",
+                message="synthetic block for fix_hint rendering",
+                fix_hint="Run `forge fix synthetic`.",
+            ),
+            validate.Finding(
+                severity="WARN",
+                target="health",
+                file=repo_root / "advisory.md",
+                message="advisory without recovery action",
+            ),
+        ]
+
+    monkeypatch.setattr(validate_cli, "validate_health", fake_health)
+
+    rc = validate.main(["--target", "health", "--repo-root", str(tmp_path)])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert rc == 1
+    block = next(f for f in payload["findings"] if f["severity"] == "BLOCK")
+    assert block["fix_hint"] == "Run `forge fix synthetic`."
+    advisory = next(f for f in payload["findings"] if f["severity"] == "WARN")
+    assert "fix_hint" not in advisory

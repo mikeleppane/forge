@@ -102,6 +102,7 @@ VALID_LIFECYCLE_PHASES = (
     "execute",
     "verify",
     "ship",
+    "qa",
 )
 
 

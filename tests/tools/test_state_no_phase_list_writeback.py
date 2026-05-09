@@ -9,9 +9,9 @@ on-disk file is byte-identical to the original. It also asserts that the
 payload returned by ``read_state`` does not carry a ``routing.phase_list``
 key when the on-disk file did not.
 
-Exclusions match P0.1's ``test_state_schema_existing_fixtures.py``:
-the bare scaffold under ``templates/feature/`` and the intentionally
-malformed/invalid fixtures used by the negative-path validators.
+The tracked-fixture walker and exclusion list live in
+``tests/_helpers/state_fixtures.py`` so the M8 regression capstone shares
+exactly the same set.
 """
 
 from __future__ import annotations
@@ -19,44 +19,17 @@ from __future__ import annotations
 import copy
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests._helpers.state_fixtures import tracked_state_files
 from tools.state import get_phase_list, read_state, write_state
-
-_EXCLUDED_RELATIVE = frozenset(
-    {
-        "templates/feature/state.json",
-        "tests/fixtures/_negative/invalid_state.json",
-        "tests/fixtures/_validate/deviations_unparseable_state/state.json",
-    }
-)
-
-
-def _tracked_state_files(repo_root: Path) -> list[Path]:
-    result = subprocess.run(
-        ["git", "ls-files", "*state.json"],
-        check=True,
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    paths: list[Path] = []
-    for line in result.stdout.splitlines():
-        rel = line.strip()
-        if not rel:
-            continue
-        if rel in _EXCLUDED_RELATIVE:
-            continue
-        paths.append(repo_root / rel)
-    return paths
 
 
 def test_tracked_state_files_set_is_non_empty(repo_root: Path) -> None:
     """Sanity: at least one tracked state.json exists, otherwise the loop is hollow."""
-    files = _tracked_state_files(repo_root)
+    files = tracked_state_files(repo_root)
     assert files, "expected at least one tracked state.json after exclusions"
 
 
@@ -74,7 +47,7 @@ def test_get_phase_list_introduces_no_write_back_drift(
     ``get_phase_list`` between read and write must change nothing on disk.
     """
     failures: list[str] = []
-    for source in _tracked_state_files(repo_root):
+    for source in tracked_state_files(repo_root):
         rel = source.relative_to(repo_root)
 
         # Baseline pass: read_state -> write_state, no accessor.
@@ -107,7 +80,7 @@ def test_get_phase_list_does_not_mutate_payload_in_place(
     pre-call payload via deep copy and compares post-call.
     """
     failures: list[str] = []
-    for source in _tracked_state_files(repo_root):
+    for source in tracked_state_files(repo_root):
         payload = read_state(source)
         snapshot = copy.deepcopy(payload)
         _ = get_phase_list(payload)
@@ -125,7 +98,7 @@ def test_read_state_does_not_inject_phase_list_when_absent_on_disk(
     the parsed payload returned by ``read_state`` must also lack that key.
     """
     failures: list[str] = []
-    for source in _tracked_state_files(repo_root):
+    for source in tracked_state_files(repo_root):
         on_disk = json.loads(source.read_text(encoding="utf-8"))
         on_disk_routing = on_disk.get("routing")
         if isinstance(on_disk_routing, dict) and "phase_list" in on_disk_routing:

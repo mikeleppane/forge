@@ -25,6 +25,21 @@ Run the FORGE ship phase against the active feature.
   the ship summary as a non-blocking advisory and never block ship. The
   on-disk glossary is left untouched on conflict; reconcile manually
   before promoting the next feature.
+- `--no-qa-prompt` — skip the pre-PR QA prompt. Treat as if the user
+  accepted the tier-aware default (`Y` for `standard` / `full`, `N` for
+  `focused`).
+- `--qa-override-with-rationale "<text>"` — bypass the pre-PR QA gate
+  entirely. Appends a `## QA Override` ADR to
+  `.forge/features/<id>/decisions.md` with the supplied rationale,
+  reviewer, and date. Use only when there is a justified reason to ship
+  without QA.
+- `--artifact-kind {cli|library|service|ui|other}` — required when the
+  operator accepts the QA prompt. Identifies the kind of artifact the QA
+  agent will exercise. Forwarded verbatim to `forge-qa`; see
+  `/forge:qa` for details.
+- `--artifact-identifier <string>` — required when the operator accepts
+  the QA prompt. Opaque string the QA agent passes to its outsider
+  subagent (e.g., a CLI invocation hint, a module name, a URL).
 
 ## Behavior
 
@@ -46,6 +61,16 @@ When `.forge/CONSTITUTION.md` is present, `/forge:ship` parses `REVIEW.code.md` 
 On `ACKNOWLEDGE`, the feature ships with `state.json.deviations[]` appended (`phase: "ship"`, `resolution: "user_acknowledged"`) and a `decisions.md` entry. The ACK mutation runs INSIDE `tools.archive.ship_feature(pre_archive_hook=...)` so a preflight failure cannot leave a ghost deviation. Audit trail survives the archive.
 
 Findings whose `Status` is `resolved` or `accepted-risk` are convergence-loop history and are NOT surfaced — the gate acts on unresolved findings only.
+
+## Pre-PR QA gate
+
+Before the atomic ship / archive step, `/forge:ship` offers an optional pre-PR QA pass. The prompt — `"Run QA before creating PR? [Y/n]"` — defaults to `Y` for `standard` and `full` tiers and to `N` for `focused`. `--no-qa-prompt` skips the prompt and applies the tier-aware default; `--qa-override-with-rationale "<text>"` suppresses both the prompt and the gate, recording a `## QA Override` ADR in `decisions.md`. On accept, ship dispatches `forge-qa` against the working tree (`forge-qa --against working-tree --feature <id> --artifact-kind <k> --artifact-identifier <i>`); the skill writes `.forge/features/<id>/QA.md` and returns a verdict and confidence. Three outcomes:
+
+- `delivers` — ship continues unchanged.
+- `partial` — operator is prompted (`"QA verdict is partial. Continue ship? [y/N]"`); declining aborts ship without state mutation, accepting appends a `## QA Override` ADR to `decisions.md` and continues.
+- `does-not-deliver` — ship aborts with the path to `QA.md` and instructions to fix findings or re-run with `--qa-override-with-rationale`. The `QA.md` is preserved on disk for review.
+
+The pre-PR gate does NOT mutate `state.json`. The post-ship `qa` phase remains `pending`; flipping it to `done` is reserved for `/forge:qa --against merged`.
 
 ## Failure modes
 

@@ -126,6 +126,29 @@ Promote a verified feature to a canonical capability and move the feature folder
      - User types `ACKNOWLEDGE` (literal uppercase): build the ack hook via `ack_hook = tools.ship_gate.make_acknowledgement_hook(state_path=..., decisions_path=..., gate_findings=gate, articles=articles)` and **carry it into step 4** — do NOT call ack_hook here.
      - Anything else: abort ship with the user's choice surfaced; halt without state mutation.
    - When `gate` is empty: continue to step 4 with `ack_hook = None`.
+3.6 **Pre-PR QA gate (optional, prompt-driven).** Before the atomic ship / archive step:
+
+   - Compute the prompt default: `Y` when `state.json.tier in {"standard", "full"}`; `N` for `focused`. Surface as: `"Run QA before creating PR? [Y/n]"` (or `"[y/N]"` when default is `N`).
+   - When the user passes `--no-qa-prompt`, skip the prompt entirely and behave as if the user answered with the tier-aware default.
+   - When the user passes `--qa-override-with-rationale "<text>"`, the prompt is suppressed AND a `## QA Override` ADR is appended to `.forge/features/<id>/decisions.md` with the supplied rationale + reviewer + date — and the QA gate is bypassed for this ship. Mirror the `## TDD Exception` ADR block style from `templates/feature/decisions.md`:
+
+     ```markdown
+     ## QA Override
+     **Rationale:** <text supplied via --qa-override-with-rationale>
+     **Reviewer:** <operator handle>
+     **Date:** YYYY-MM-DD
+     **Scope:** pre-PR QA gate bypass for this ship
+     ```
+
+   - On user response `Y` (or default `Y` when prompt skipped):
+     1. Build an `ArtifactDescriptor` by asking the user for `--artifact-kind {cli|library|service|ui|other}` and `--artifact-identifier <string>`. Both can also be passed as flags to `/forge:ship`; in that case do not re-prompt.
+     2. Dispatch the `forge-qa` skill in pre-PR mode, equivalent to invoking it with `--against working-tree --feature <id> --artifact-kind <k> --artifact-identifier <i>`. Forward `--non-interactive` and `--no-adversarial` through if `forge-ship` received them.
+     3. The QA skill produces `.forge/features/<id>/QA.md` and returns `verdict ∈ {delivers, partial, does-not-deliver}` plus `confidence ∈ {high, partial, low}`. The skill performs no `state.json` mutation in pre-PR mode (the qa phase remains pending; only post-merge `/forge:qa` flips its status).
+     4. Gate behavior:
+        - `verdict == "delivers"` → continue to step 4.
+        - `verdict == "partial"` → prompt the user: `"QA verdict is partial. Continue ship? [y/N]"`. On `n` (default): abort ship without state mutation. On `y`: append a `## QA Override` ADR to `decisions.md` noting the partial verdict, the operator's confirmation, and the date, then continue to step 4.
+        - `verdict == "does-not-deliver"` → abort ship with: `"forge-ship blocked by QA verdict 'does-not-deliver'. Review .forge/features/<id>/QA.md, fix findings, then re-run /forge:ship. Override with --qa-override-with-rationale '<reason>' if you must ship anyway."`. The `QA.md` is preserved on disk for review; no state mutation occurs.
+   - On user response `N` (or default `N` when prompt skipped): skip QA. Print: `"QA gate skipped. /forge:qa --feature <id> --against merged is available after ship completes."`.
 4. **Atomic ship with composed pre-archive hook.** Do NOT touch state.json before this step — `tools.archive.ship_feature` runs preflight first, and any state mutation before preflight risks marking state `done` when the ship aborts (capability already shipped, archive target exists, source missing). Compose the ack hook (when present) with `_mark_done`:
 
    ```python
@@ -165,3 +188,21 @@ Promote a verified feature to a canonical capability and move the feature folder
 ## Done
 
 Canonical capability SPEC.md exists at `.forge/specs/<capability>/SPEC.md`. Feature folder archived. State (now under the archive) reflects done.
+
+## State writes
+
+- `state.json` — `current_phase` advances to `done`; `phases.ship.status` flips to `done`; on a `§5.3.9` ACKNOWLEDGE, an entry is appended to `state.json.deviations[]` (`phase: "ship"`, `resolution: "user_acknowledged"`).
+- `.forge/specs/<capability>/SPEC.md` — canonical spec written (or rolled back on archive failure).
+- Feature folder moved from `.forge/features/<id>/` to `.forge/features/archive/<id>/`.
+- `.forge/domain/glossary.md` — modified only when `--promote-domain` is set, the tier is `full`, and no glossary conflict is surfaced (advisory; never blocks ship).
+- `.forge/features/<id>/QA.md` — written by the optional pre-PR QA gate (step 3.6) when the operator accepts the prompt. Authored by `forge-qa`; ship does not edit it.
+- `.forge/features/<id>/decisions.md` — appended to in two cases unrelated to the canonical lifecycle: (1) a `## QA Override` ADR when `--qa-override-with-rationale` is supplied or when the operator chooses to continue past a `partial` QA verdict; (2) `§5.3.9` ACKNOWLEDGE deviation entry.
+- The pre-PR QA gate does NOT mutate `state.json`. The post-ship `qa` phase remains `pending`; only `/forge:qa --against merged` flips its status to `done`.
+
+## See also
+
+- `forge-qa` — the skill dispatched by the pre-PR QA gate; also the post-merge terminal phase.
+- `tools.qa` — black-box acceptance, edge probing, capped adversarial probe, and Negative-Requirement re-grep helpers used by `forge-qa`.
+- `templates/feature/QA.md` — `QA.md` artifact template and verdict + confidence aggregation rule.
+- `templates/feature/decisions.md` — `## TDD Exception` ADR block style mirrored by the `## QA Override` ADR.
+- `commands/ship.md` — slash-command surface; documents the QA-gate flags.

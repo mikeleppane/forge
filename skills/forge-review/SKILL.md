@@ -35,6 +35,21 @@ The plain name `.forge/features/<id>/REVIEW.md` is reserved (do not write it). D
    - For target=plan: walk every slice. Check (a) every acceptance criterion mapped to exactly one slice; (b) every file in scope appears in exactly one slice unless shared; (c) Verified Dependencies non-empty when new deps; (d) wave dependencies make sense (no Wave 2 task depends on a Wave 3 task).
    - For target=code: walk every commit since spec creation. Check (a) commit message follows Conventional Commits with allowed scope; (b) commit content matches one PLAN.md task; (c) tests added or modified for new behavior; (d) no obvious misalignment with SPEC § Negative Requirements.
    - Append findings to the per-target `REVIEW.<target>.md` § Findings with `Source: self`. Severity: BLOCK / HIGH / MEDIUM / LOW.
+4a. **Cross-AI dispatch (manual mode, optional).** Triggered when user passes `--cross-ai` to `/forge:review`.
+   - **Mode resolution.** Read `.forge/config.json` cross_ai block via `tools.cross_ai.config.load_config(repo_root)`. Refuse with hint if `mode == "disabled"`.
+   - **CLI selection.** Call `tools.cross_ai.detect.detect_clis()` + `pick_reviewer(executor_model=os.environ.get("FORGE_MODEL"), available=<detected>, allowed_clis=<from config>)`. No CLI on PATH → refuse with hint listing supported CLIs.
+   - **Build prompt.** Call `tools.cross_ai.prompt.build_prompt(target, feature_id, repo_root)`.
+   - **Redact.** Call `tools.redaction.filter(redaction.PromptPayload(text=prompt.body, files=prompt.files_referenced), <RedactionConfig from cross_ai.redaction>)`. On `redaction_result.fatal_matches` non-empty: REFUSE dispatch, surface findings to user, abort cross-ai branch (in-house review continues normally).
+   - **Build disclosure.** Call `tools.cross_ai.disclosure.build_disclosure(prompt, redaction_result, cli, config, diff_loc=<from prompt body for target=code>)`.
+   - **Write prompt to disk.** Call `tools.cross_ai.manual.write_prompt_to_disk(prompt, feature_id, repo_root)` — receives the prompt path.
+   - **Render + display disclosure.** Call `tools.cross_ai.manual.format_disclosure_summary(disclosure, prompt_path)` and surface to user. The disclosure includes the cost-warn flag — when `cost_warn_triggered`, print a callout but do NOT block (manual mode never gates on cost; user reviews before sending).
+   - **Halt cross-ai branch.** Skill exits the cross-ai branch; review phase remains in heavy-pass cycle N. Convergence frontmatter unchanged until paste-back. The in-house heavy pass (Step 5) still runs in the same cycle when its trigger conditions hold.
+4b. **Cross-AI paste-back (optional).** Triggered when user passes `--cross-ai-paste <path>` to `/forge:review`.
+   - **Read response.** Call `tools.cross_ai.manual.read_paste_response(path)`. UTF-8 decode failure → surface error, abort.
+   - **Resolve reviewer ID.** From the response's first frontmatter `reviewer:` field if present; else from `--reviewer <name>` flag if passed; else `"unknown"`.
+   - **Parse findings.** Call `tools.cross_ai.parse.parse_response(response_text, reviewer_id, target)`. On `ParseWarning` (no table found): surface warning, prompt user to retry; do not merge.
+   - **Merge findings.** Call `tools.cross_ai.manual.merge_findings_into_review(findings, target, feature_id, repo_root)`. Surface the count appended.
+   - **Re-enter convergence loop.** Bump `REVIEW.<target>.md` frontmatter `cycles: N+1` if HIGH+ findings were merged. Re-execute Step 6 (Convergence Log) + Step 7 (Drive convergence) against the merged file. External findings count toward HIGH+ tally identically to in-house findings.
 5. **Cycle N — Heavy subagent pass.** Triggered when ANY of:
    - self-review surfaced ≥ 1 HIGH+ finding, OR
    - user explicitly requested `--heavy`, OR

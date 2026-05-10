@@ -253,26 +253,59 @@ def _spec_creation_sha(state_payload: dict[str, Any]) -> str | None:
     return None
 
 
-def _git_diff_section(
+def _git_changed_files(repo_root: Path, range_spec: str) -> tuple[str, ...]:
+    """Return the file paths git reports as changed across ``range_spec``.
+
+    The single source of truth for the code-target file inventory: state.json
+    schema does not record per-commit file paths (``additionalProperties:
+    false`` on the commits array — see ``schemas/state.schema.json``), so
+    the inventory is derived from the diff itself rather than from state.
+
+    Empty tuple on ``CalledProcessError`` (e.g. unrooted base SHA, repo not
+    a git checkout) — the caller emits an unavailable annotation in that
+    case.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", range_spec],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return ()
+    return tuple(line for line in result.stdout.splitlines() if line)
+
+
+def _build_code_diff_block(
     repo_root: Path,
     state_payload: dict[str, Any],
-) -> str:
-    """Render the ``## Diff`` section for target=code prompts.
+) -> tuple[str, tuple[PurePosixPath, ...]]:
+    """Build the ``## Diff`` Markdown block + the changed-file inventory.
 
     Failure modes per plan step 4 + §P1.4 failure-modes block:
 
-    * Empty ``state.commits[]`` → ``_diff unavailable: no commits
-      recorded_`` annotation. Not fatal — the reviewer still sees the
-      SPEC excerpts and can comment on contract drift.
-    * ``git diff`` raises ``subprocess.CalledProcessError`` (e.g. SHA
-      not in tree, repo root not a git checkout) → ``_diff unavailable_``
-      annotation. Wrapped, never re-raised.
+    * Empty ``state.commits[]`` (no spec-creation SHA resolvable) →
+      ``_diff unavailable: no commits recorded_`` annotation; empty
+      file inventory. Not fatal — reviewer still sees SPEC excerpts.
+    * ``git diff --stat`` raises ``CalledProcessError`` → ``_diff
+      unavailable_`` annotation; file inventory is whatever
+      ``--name-only`` produced (possibly empty if the same SHA is
+      unresolvable in both invocations).
+
+    Returning the inventory alongside the rendered block makes the
+    redaction overlay (``Prompt.files_referenced``) consistent with the
+    diff the reviewer is asked to comment on.
     """
     base_sha = _spec_creation_sha(state_payload)
     if base_sha is None:
-        return "## Diff\n\n_diff unavailable: no commits recorded_\n"
+        return "## Diff\n\n_diff unavailable: no commits recorded_\n", ()
 
     range_spec = f"{base_sha}..HEAD"
+    changed_files = _git_changed_files(repo_root, range_spec)
+    files_referenced = tuple(PurePosixPath(p) for p in changed_files)
+
     try:
         stat_result = subprocess.run(
             ["git", "diff", "--stat", range_spec],
@@ -282,36 +315,11 @@ def _git_diff_section(
             check=True,
         )
     except subprocess.CalledProcessError:
-        return "## Diff\n\n_diff unavailable_\n"
+        return "## Diff\n\n_diff unavailable_\n", files_referenced
 
     chunks: list[str] = ["## Diff", "", "```", stat_result.stdout.rstrip(), "```", ""]
-    seen_files = _collect_commit_files(state_payload)
-    chunks.extend(_render_per_file_diffs(repo_root, range_spec, seen_files))
-    return "\n".join(chunks)
-
-
-def _collect_commit_files(state_payload: dict[str, Any]) -> list[str]:
-    """Order-preserving dedupe of ``commits[*].files`` string entries.
-
-    Today's state.json schema does not record per-commit file paths;
-    when callers populate the field (P2/P3 may do so) this helper
-    surfaces them so the per-file diff loop renders one section per
-    file instead of falling back to the full-range diff.
-    """
-    seen: dict[str, None] = {}
-    commits = state_payload.get("commits", [])
-    if not isinstance(commits, list):
-        return []
-    for entry in commits:
-        if not isinstance(entry, dict):
-            continue
-        files = entry.get("files")
-        if not isinstance(files, list):
-            continue
-        for file_entry in files:
-            if isinstance(file_entry, str) and file_entry:
-                seen[file_entry] = None
-    return list(seen)
+    chunks.extend(_render_per_file_diffs(repo_root, range_spec, list(changed_files)))
+    return "\n".join(chunks), files_referenced
 
 
 def _render_per_file_diffs(
@@ -324,7 +332,7 @@ def _render_per_file_diffs(
     When ``seen_files`` is non-empty we shell out once per file so the
     reviewer sees one ``### path`` heading per change. When empty, we
     issue a single full-range ``git diff`` so the diff still reaches the
-    reviewer even though per-commit file lists are not recorded.
+    reviewer even though no individual file path was reported.
     """
     if seen_files:
         out: list[str] = []
@@ -353,24 +361,6 @@ def _render_per_file_diffs(
     except subprocess.CalledProcessError:
         return ["_per-file diff unavailable_\n"]
     return ["### Full diff", "", "```diff", per_file.stdout.rstrip(), "```", ""]
-
-
-def _commit_files_referenced(state_payload: dict[str, Any]) -> tuple[PurePosixPath, ...]:
-    """Order-preserving dedupe of every file path mentioned in commits."""
-    seen: dict[PurePosixPath, None] = {}
-    commits = state_payload.get("commits", [])
-    if not isinstance(commits, list):
-        return ()
-    for entry in commits:
-        if not isinstance(entry, dict):
-            continue
-        files = entry.get("files")
-        if not isinstance(files, list):
-            continue
-        for file_entry in files:
-            if isinstance(file_entry, str) and file_entry:
-                seen[PurePosixPath(file_entry)] = None
-    return tuple(seen)
 
 
 # --- public API -----------------------------------------------------------
@@ -430,10 +420,12 @@ def build_prompt(
         chunks.extend(["# Plan", "", plan_text.rstrip(), ""])
         files_referenced = _extract_files_in_scope(plan_text)
     else:
-        # target=code — read state.json for commits + render diff.
+        # target=code — read state.json for commit base, derive the
+        # changed-file inventory from git itself (state schema does not
+        # record per-commit files; see ``_git_changed_files``).
         state_payload = read_state(feature_root / "state.json")
-        chunks.append(_git_diff_section(repo_root, state_payload))
-        files_referenced = _commit_files_referenced(state_payload)
+        diff_block, files_referenced = _build_code_diff_block(repo_root, state_payload)
+        chunks.append(diff_block)
 
     # Constitution articles (P3 helper). The filter reads
     # .forge/CONSTITUTION.md, scopes by intent + files, and respects

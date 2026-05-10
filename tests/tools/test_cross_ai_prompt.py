@@ -186,13 +186,15 @@ def test_code_target_includes_diff_stat_and_per_file_diff(
     fake_stat = (
         " src/payments.py | 12 ++++++++----\n 1 file changed, 8 insertions(+), 4 deletions(-)\n"
     )
+    fake_name_only = "src/payments.py\n"
     fake_per_file = "diff --git a/src/payments.py b/src/payments.py\n@@ -1 +1,5 @@\n+kill switch\n"
 
     calls: list[list[str]] = []
 
     def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
-        # The first call is the --stat header; subsequent calls are per-file.
+        if "--name-only" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=fake_name_only, stderr="")
         if "--stat" in args:
             return subprocess.CompletedProcess(args, 0, stdout=fake_stat, stderr="")
         return subprocess.CompletedProcess(args, 0, stdout=fake_per_file, stderr="")
@@ -207,6 +209,12 @@ def test_code_target_includes_diff_stat_and_per_file_diff(
     # Spec creation SHA = first commit in state.commits[]; HEAD reference
     # used via "..HEAD" range.
     assert any("abc1234..HEAD" in arg for call in calls for arg in call)
+    # files_referenced is sourced from `git diff --name-only`, not from the
+    # state.json schema (which forbids commits[*].files via
+    # additionalProperties: false). The redaction overlay must therefore
+    # carry exactly what git reports as changed.
+    assert prompt.files_referenced == (PurePosixPath("src/payments.py"),)
+    assert any("--name-only" in arg for call in calls for arg in call)
 
 
 # --- (d) target=code with empty state.commits[] ----------------------------
@@ -293,3 +301,95 @@ def test_code_target_git_diff_failure_degrades_to_unavailable(
     prompt = build_prompt(PromptTarget.code, feature_id, tmp_path)
 
     assert "_diff unavailable_" in prompt.body
+    # When git fails entirely, the file inventory is empty — the redaction
+    # overlay must not carry phantom paths the diff did not surface.
+    assert prompt.files_referenced == ()
+
+
+def test_code_target_per_file_diff_failure_skips_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One file fails its per-file diff while another succeeds — the
+    failing file's section is silently dropped and the rest of the diff
+    block still renders. Exercises the ``continue`` branch in
+    ``_render_per_file_diffs``.
+    """
+    feature_id = "2026-05-10-sample"
+    _seed_feature(tmp_path, feature_id, state=_STATE_PAYLOAD)
+
+    fake_stat = " a.py | 1\n b.py | 1\n 2 files changed\n"
+    fake_name_only = "a.py\nb.py\n"
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--name-only" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=fake_name_only, stderr="")
+        if "--stat" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=fake_stat, stderr="")
+        # Per-file diff: succeed for a.py, fail for b.py.
+        if "--" in args and args[args.index("--") + 1] == "a.py":
+            return subprocess.CompletedProcess(args, 0, stdout="diff a.py", stderr="")
+        raise subprocess.CalledProcessError(returncode=128, cmd=args, stderr="ENOSHA")
+
+    monkeypatch.setattr("tools.cross_ai.prompt.subprocess.run", fake_run)
+
+    prompt = build_prompt(PromptTarget.code, feature_id, tmp_path)
+
+    assert "### a.py" in prompt.body
+    assert "### b.py" not in prompt.body  # silently dropped
+    assert prompt.files_referenced == (PurePosixPath("a.py"), PurePosixPath("b.py"))
+
+
+def test_code_target_name_only_empty_falls_through_to_full_diff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``git diff --name-only`` reports no changes (empty stdout)
+    but ``--stat`` succeeds, ``_render_per_file_diffs`` falls through
+    to the full-range diff fallback so the reviewer still sees the
+    change-set body. Exercises the empty-list branch.
+    """
+    feature_id = "2026-05-10-sample"
+    _seed_feature(tmp_path, feature_id, state=_STATE_PAYLOAD)
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--name-only" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if "--stat" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=" no files\n", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="raw diff body", stderr="")
+
+    monkeypatch.setattr("tools.cross_ai.prompt.subprocess.run", fake_run)
+
+    prompt = build_prompt(PromptTarget.code, feature_id, tmp_path)
+
+    assert "### Full diff" in prompt.body
+    assert "raw diff body" in prompt.body
+    assert prompt.files_referenced == ()
+
+
+def test_code_target_full_diff_failure_emits_per_file_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--name-only`` reports nothing AND the full-range diff fails →
+    ``_per-file diff unavailable_`` annotation. Exercises the
+    ``CalledProcessError`` arm of the empty-list branch.
+    """
+    feature_id = "2026-05-10-sample"
+    _seed_feature(tmp_path, feature_id, state=_STATE_PAYLOAD)
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--name-only" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if "--stat" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=" stat ok\n", stderr="")
+        raise subprocess.CalledProcessError(returncode=128, cmd=args, stderr="boom")
+
+    monkeypatch.setattr("tools.cross_ai.prompt.subprocess.run", fake_run)
+
+    prompt = build_prompt(PromptTarget.code, feature_id, tmp_path)
+
+    assert "_per-file diff unavailable_" in prompt.body
+
+

@@ -175,3 +175,14 @@ def test_invalid_dispatch_approved_at_timestamp_rejected(tmp_path: Path) -> None
     )
     with pytest.raises(CrossAiConfigError):
         load_config(tmp_path)
+
+
+def test_malformed_config_json_rejected(tmp_path: Path) -> None:
+    """Invalid JSON in ``.forge/config.json`` raises a typed error
+    naming the parse failure (covers the ``json.JSONDecodeError`` arm of
+    the loader)."""
+    forge_dir = tmp_path / ".forge"
+    forge_dir.mkdir(parents=True)
+    (forge_dir / "config.json").write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(CrossAiConfigError, match="malformed"):
+        load_config(tmp_path)

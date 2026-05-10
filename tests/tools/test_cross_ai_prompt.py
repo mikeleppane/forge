@@ -393,3 +393,75 @@ def test_code_target_full_diff_failure_emits_per_file_unavailable(
     assert "_per-file diff unavailable_" in prompt.body
 
 
+def test_code_target_uses_explicit_created_at_sha(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``state.created_at_sha`` wins over the first commit when present.
+    Exercises the explicit-SHA branch of ``_spec_creation_sha``.
+    """
+    feature_id = "2026-05-10-sample"
+    state_with_explicit = {**_STATE_PAYLOAD, "created_at_sha": "deadbee"}
+    _seed_feature(tmp_path, feature_id, state=state_with_explicit)
+
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.cross_ai.prompt.subprocess.run", fake_run)
+
+    build_prompt(PromptTarget.code, feature_id, tmp_path)
+
+    assert any("deadbee..HEAD" in arg for call in calls for arg in call)
+
+
+def test_intent_truncated_to_word_cap_with_ellipsis(tmp_path: Path) -> None:
+    """Long intents are clipped to the documented 200-word cap and the
+    cut is signaled with a trailing ellipsis token so the reviewer can
+    tell the section was trimmed.
+    """
+    feature_id = "2026-05-10-long-intent"
+    long_intent = "word " * 300  # 300 whitespace-separated tokens
+    spec_with_long_intent = (
+        "# Sample\n\n## Intent\n"
+        + long_intent
+        + "\n\n## Acceptance Criteria\n- ok.\n\n## Negative Requirements\n- none.\n"
+    )
+    _seed_feature(tmp_path, feature_id, spec=spec_with_long_intent, understanding=None)
+
+    prompt = build_prompt(PromptTarget.plan, feature_id, tmp_path)
+
+    # Trimmed body ends with the ellipsis token; the full 300-word run is
+    # not present.
+    assert "…" in prompt.body
+    intent_segment_end = prompt.body.find("# Acceptance")
+    intent_segment = prompt.body[:intent_segment_end]
+    assert intent_segment.count("word") <= 210  # cap + small slack for surrounding text
+
+
+def test_constitution_articles_are_serialized_when_present(tmp_path: Path) -> None:
+    """When ``.forge/CONSTITUTION.md`` is present and at least one
+    article passes the scope filter, the prompt body includes the
+    rendered article block. Exercises ``_serialize_articles``.
+    """
+    feature_id = "2026-05-10-sample"
+    _seed_feature(tmp_path, feature_id)
+    constitution = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-10"\n---\n\n'
+        "# Constitution\n\n"
+        "## Article 1 — Feature flag cache discipline [CRITICAL]\n\n"
+        "**Rule:** Feature flag values MUST NOT be cached across requests "
+        "in the payments path.\n"
+        "**Reference:** ADR-2026-05-feature-flag-cache\n"
+        "**Rationale:** Cached flags hide flips and produce stale 200s.\n"
+        "**Exception:** None.\n"
+    )
+    (tmp_path / ".forge").mkdir(exist_ok=True)
+    (tmp_path / ".forge" / "CONSTITUTION.md").write_text(constitution, encoding="utf-8")
+
+    prompt = build_prompt(PromptTarget.plan, feature_id, tmp_path)
+
+    assert "## Constitution (filtered)" in prompt.body
+    assert "A1" in prompt.body

@@ -200,6 +200,39 @@ def test_finding_is_frozen() -> None:
         finding.severity = "LOW"  # type: ignore[misc]
 
 
+# --- coverage: header candidate without separator → rejected ---------------
+
+
+def test_header_lookalike_without_separator_is_rejected() -> None:
+    """A prose line that names every required column but is not followed
+    by a Markdown separator must NOT be accepted as a header — otherwise
+    arbitrary inline mentions of the column names would parse as tables.
+    """
+    body = (
+        "Reviewer mentioned the | ID | Severity | Status | Location | Problem | Fix | columns.\n"
+        "But never produced an actual table.\n"
+    )
+    with pytest.warns(ParseWarning):
+        result = parse_response(body, reviewer_id="codex", target="plan")
+    assert result == ()
+
+
+def test_table_terminates_on_blank_line_followed_by_prose() -> None:
+    """The data-row loop must stop at the first non-table line so trailing
+    prose under the table is not interpreted as a finding.
+    """
+    body = (
+        "| ID | Severity | Status | Location | Problem | Fix | Source |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| F1 | HIGH | open | x.py:1 | issue | fix | reviewer |\n"
+        "\n"
+        "Closing thoughts: this looks fine otherwise.\n"
+    )
+    result = parse_response(body, reviewer_id="codex", target="plan")
+    assert len(result) == 1
+    assert result[0].id == "F1"
+
+
 def test_blank_line_between_separator_and_first_row_tolerated() -> None:
     """An authoring style that spaces the separator one line away from
     the first data row must still parse — the skip-separator helper
@@ -214,3 +247,14 @@ def test_blank_line_between_separator_and_first_row_tolerated() -> None:
     result = parse_response(body, reviewer_id="codex", target="plan")
     assert len(result) == 1
     assert result[0].severity == "LOW"
+
+
+def test_header_followed_by_only_blank_lines_is_rejected() -> None:
+    """A header candidate followed by EOF with only blank lines (no
+    separator at all) is not a valid table — the parser walks the
+    look-ahead helper to its terminal ``return False`` branch.
+    """
+    body = "| ID | Severity | Status | Location | Problem | Fix | Source |\n\n\n"
+    with pytest.warns(ParseWarning):
+        result = parse_response(body, reviewer_id="codex", target="plan")
+    assert result == ()

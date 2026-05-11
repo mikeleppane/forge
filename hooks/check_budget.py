@@ -8,6 +8,21 @@ non-empty ``files_in_scope`` list of bounded globs, and a non-empty
 ``forbidden`` list. Otherwise the hook returns a PreToolUse deny decision;
 otherwise it returns an empty object (allow).
 
+Optional budget fields recognized elsewhere in the FORGE stack:
+
+* ``tests_in_scope`` (required for ``phase == "execute"`` unless
+  ``tdd_exception_ref`` is set; shape-checked here).
+* ``articles`` (optional): list of filtered Constitution articles
+  serialized via ``tools.constitution.Article.to_budget_dict``. Hook is
+  permissive on this field — shape is not validated here; the producing
+  skill (``forge-spec`` / ``forge-plan`` / ``forge-execute`` /
+  ``forge-review``) owns shape.
+* ``traps`` (optional): list of filtered cross-feature trap lessons,
+  serialized via ``tools.intel.lessons.Lesson.to_budget_dict``. Hook is
+  permissive on this field — shape is not validated here; the producing
+  skill (``forge-spec`` / ``forge-plan`` / ``forge-execute``) owns
+  shape.
+
 Stdlib-only. The hook may run as ``python3 ${CLAUDE_PLUGIN_ROOT}/hooks/check_budget.py``
 from a target repo where third-party deps (``jsonschema``, ``yaml``) are
 not on ``sys.path``. To stay independent of the dev install we:

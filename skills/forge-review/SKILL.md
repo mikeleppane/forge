@@ -91,6 +91,86 @@ The plain name `.forge/features/<id>/REVIEW.md` is reserved (do not write it). D
    - If HIGH+ remaining > 0 AND cycle N < 3: surface findings to user, accept resolutions (edits to SPEC / PLAN / code or accepted-risk entries in `decisions.md`), bump `REVIEW.<target>.md` frontmatter `cycles: N+1`, repeat steps 4–6.
    - If HIGH+ remaining > 0 AND cycle N == 3: keep `REVIEW.<target>.md` frontmatter `status: open`, surface to user with full residual list, halt without transitioning state. Document blocker in `decisions.md` § Open.
    - If HIGH+ remaining == 0: set `REVIEW.<target>.md` frontmatter `status: resolved`, proceed.
+7a. **Harvest trap candidates (optional).** During the Step 7
+   drive-convergence walk, for each row that was just flipped from
+   `Status: open` to `Status: resolved`:
+
+   - Skip if `Resolved by` is empty, `spec-edit`, `plan-edit`, or
+     `accepted-risk:<reason>` — no fix-with-SHA means no trap-with-fix
+     pair to learn from, and the `decisions.md` rationale already
+     captures the accepted-risk path.
+   - Skip if Severity is `MEDIUM` or `LOW` — the trap-memory signal is
+     reserved for high-impact regressions. The relevance scorer in
+     `tools.intel.lessons.load_and_filter` would deprioritize them
+     anyway, and harvesting them only inflates the `MAX_LESSON_WORDS`
+     budget for downstream dispatches.
+   - Otherwise, prompt the user via **one** `AskUserQuestion`:
+
+     > Trap candidate detected for F-<n> (resolved by <sha[:8]>).
+     > Capture as lesson for future subagents?
+
+     Options (single-select):
+
+     - `[y]es-author-now` — draft a `tools.intel.lessons.Lesson` record
+       in this turn (see "On `[y]es-author-now`" below).
+     - `[N]o-skip` — no disk mutation; the row stays `resolved`; no
+       lesson harvested. Continue with the next resolved row.
+     - `[e]dit-then-author` — same drafting flow as `[y]es-author-now`
+       but open the rendered draft in `$EDITOR` before persisting.
+
+   - **On `[y]es-author-now`.** Call
+     `tools.intel.lessons.next_id(repo_root)` → bound as `lesson_id`.
+     Build the Lesson record with:
+
+     - `id` = `lesson_id`.
+     - `captured` = today's date.
+     - `captured_from` = the active feature id.
+     - `resolved_by` = the full 40-hex SHA from the row's `Resolved by`
+       cell (NOT the truncated `sha[:8]` shown in the prompt — the
+       parser requires the full hash).
+     - `trap` = the row's Problem column (strip the
+       `[constitution:A<n>]` or `[lesson:L<NNN>]` prefix tag when
+       present so the trap body is clean prose).
+     - `avoidance` = the row's Fix column.
+     - `severity` = translated from the row's Severity cell. Lessons
+       use the `CRITICAL / HIGH / MEDIUM / LOW` vocabulary while review
+       rows use `BLOCK / HIGH / MEDIUM / LOW`. Mapping: `BLOCK` →
+       `CRITICAL`; `HIGH` → `HIGH`. Per the skip rule above, `MEDIUM` /
+       `LOW` rows never reach this branch.
+     - `tags` = draft from
+       `tools.intel.lessons._TAG_VOCAB` by matching the row's Problem
+       text against the vocabulary keywords. The frozen vocabulary
+       (`imports`, `fixtures`, `state-mutation`, `async`, `secrets`,
+       `validation`, `dispatch`, `review-tagging`, `ship-gate`,
+       `cross-ai`, `bdd`, `frontmatter`) is the only accepted tag
+       source — free-form tags are refused by the parser.
+     - `status` = `active`.
+
+     Surface the drafted Lesson body verbatim, then present **one**
+     `AskUserQuestion`:
+
+     > Append this lesson?
+
+     Options: `[a]ccept` (call
+     `tools.intel.lessons.append(repo_root, lesson)`) / `[e]dit` (open
+     the rendered body in `$EDITOR`, re-parse via
+     `tools.intel.lessons.parse_text`, then accept-or-cancel) /
+     `[c]ancel` (no disk mutation; row stays resolved).
+
+   - **On `[e]dit-then-author`.** Same drafting flow as
+     `[y]es-author-now`, but open the rendered draft in `$EDITOR`
+     before showing the accept selector. Re-parse the edited body via
+     `tools.intel.lessons.parse_text`; on `LessonError`, surface the
+     message and offer one repair round in the editor, then fall
+     through to `[c]ancel`.
+
+   - **On `[N]o-skip` or `[c]ancel`.** No disk mutation. The row stays
+     `resolved`; no lesson is harvested. Continue with the next
+     resolved row.
+
+   Each candidate is processed in its own `AskUserQuestion` turn — no
+   batched "harvest all" prompt. The sequential pattern matches the
+   rest of FORGE's user interactions (workshop L1).
 8. **Self-review gate:** `REVIEW.<target>.md` status is `resolved` AND no BLOCK findings remain unresolved.
 9. **Record target completion.** Call `tools.state.complete_review_target(path, review_target=<plan|code>)` so `phases.review.targets_done` records this pass. Idempotent within the same target.
 10. **Transition state — depends on target:**

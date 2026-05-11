@@ -7,6 +7,14 @@ disable-model-invocation: true
 
 # FORGE Domain
 
+> **`state.json` is hook-protected.** Mutate it only through the
+> `tools.state.*` helpers — `complete_phase`, `start_phase`,
+> `record_routing_decision`, `record_refined_idea`, `record_commit`,
+> `append_deviation`, `set_execute_current_slice`. The PreToolUse hook
+> at `hooks/check_state_writer.py` refuses direct `Write` / `Edit` /
+> `MultiEdit` on `.forge/features/<id>/state.json` and surfaces a
+> permission-deny with guidance toward the correct helper.
+
 ## When this skill applies
 
 `/forge:do` (full tier) advanced state through `/forge:spec` and the `_FULL_NEXT`
@@ -111,12 +119,12 @@ tiers fill `# Domain` at spec time and never enter this phase.
    - No compound term (e.g., `delta proposal validator`) is left undefined
      when its constituents alone are insufficient.
    - On unresolvable terms in **auto mode**: append a `decisions.md` entry
-     **and** append a structured object to `state.json.deviations` matching
-     the schema shape `{phase, cause, resolution}` (per
-     `schemas/state.schema.json` — `deviations[]` items are objects, never
-     bare strings). Use:
-     `{"phase": "domain", "cause": "unresolved terms", "resolution": "proceeding with best-effort glossary"}`.
-     Then advance.
+     **and** call
+     `tools.state.append_deviation(path, phase="domain", cause="unresolved terms", resolution="proceeding with best-effort glossary")`.
+     The helper writes the schema-validated entry (`{phase, cause,
+     resolution, logged_at}`) through the hook-protected path; direct
+     `Write`/`Edit`/`MultiEdit` on `state.json.deviations` is refused by
+     the PreToolUse hook. Then advance.
    - On unresolvable terms in **interactive mode**: halt and ask the user
      to disambiguate.
 10. **Phase transition.** Call `tools.state.complete_phase(path, "domain")`

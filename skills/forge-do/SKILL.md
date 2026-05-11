@@ -9,7 +9,8 @@ disable-model-invocation: true
 
 > **`state.json` is hook-protected.** Mutate it only through the
 > `tools.state.*` helpers — `complete_phase`, `start_phase`,
-> `record_routing_decision`, `record_refined_idea`. The PreToolUse hook
+> `record_routing_decision`, `record_refined_idea`, `record_commit`,
+> `append_deviation`, `set_execute_current_slice`. The PreToolUse hook
 > at `hooks/check_state_writer.py` refuses direct `Write` / `Edit` /
 > `MultiEdit` on `.forge/features/<id>/state.json` and surfaces a
 > permission-deny with guidance toward the correct helper.

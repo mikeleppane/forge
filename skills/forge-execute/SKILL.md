@@ -8,7 +8,8 @@ disable-model-invocation: true
 
 > **`state.json` is hook-protected.** Mutate it only through the
 > `tools.state.*` helpers — `complete_phase`, `start_phase`,
-> `record_routing_decision`, `record_refined_idea`. The PreToolUse hook
+> `record_routing_decision`, `record_refined_idea`, `record_commit`,
+> `append_deviation`, `set_execute_current_slice`. The PreToolUse hook
 > at `hooks/check_state_writer.py` refuses direct `Write` / `Edit` /
 > `MultiEdit` on `.forge/features/<id>/state.json` and surfaces a
 > permission-deny with guidance toward the correct helper.
@@ -47,12 +48,12 @@ text verbatim into the dispatch prompt.
    - Budget: SPEC § [Intent, Codebase Anchors, Scope, Scenarios, Acceptance, Negative Requirements]; `files_in_scope` = union of Codebase Anchors paths.
    - Budget MUST also include `phase: "execute"` (literal) so the PreToolUse hook applies the TDD-pair check, and `tests_in_scope: string[]` listing the test files this dispatch creates or modifies (drives the validator's pairing check). When a paired test genuinely does not fit, set `tdd_exception_ref` to the matching ADR id from `decisions.md` (recorded as a `## TDD Exception: <AC-id>` heading with `Rationale`, `Reviewer`, and `Date` keys) — only then may `tests_in_scope` be empty.
    - Task: implement each acceptance criterion via TDD per [forge-tdd](../forge-tdd/SKILL.md); embed that skill's `<!-- scaffold:begin -->` / `<!-- scaffold:end -->` block verbatim in the dispatched subagent's `# Steps`.
-3c. Append summary to `.forge/features/<id>/slice-1.summary`. Append commit shas to `state.commits[]` with the schema-required fields only — `{ "sha": "...", "phase": "execute", "subject": "...", "logged_at": "..." }`. Slice membership lives in `slice-<N>.summary`, not in `state.commits[]` (the schema rejects extra keys).
+3c. Append summary to `.forge/features/<id>/slice-1.summary`. Record each commit via `tools.state.record_commit(path, sha=<sha>, phase="execute", subject=<subject>)` — the helper stamps `logged_at`, schema-validates the entry, and writes through the hook-protected path. Do NOT attempt to `Write`/`Edit`/`MultiEdit` `state.json` to append commits; the PreToolUse hook refuses those calls and a Bash-bypass would skip schema validation. Slice membership lives in `slice-<N>.summary`, not in `state.commits[]` (the schema rejects extra keys on commits[] items).
 
 ### Standard / Full branch (M2)
 
 3d. Read PLAN.md. Parse slices in order. For each slice:
-   - Mark `state.json.phases.execute.current_slice = <N>` (already permitted by schema).
+   - Stamp the slice cursor via `tools.state.set_execute_current_slice(path, slice_number=<N>)`. The helper validates `<N> >= 1`, requires `phases.execute.status == "in_progress"`, and writes through the hook-protected path. Do NOT `Write`/`Edit` `state.json` to set this field directly.
    - Walk waves in order. Within a wave, dispatch tasks in parallel; between waves, sequential.
    - For each task: dispatch ONE subagent. Budget block MUST include:
      - `phase`: literal `"execute"` so the PreToolUse hook applies the TDD-pair check.
@@ -64,7 +65,7 @@ text verbatim into the dispatch prompt.
      - `articles`: filtered Constitution articles (empty list when `.forge/CONSTITUTION.md` is absent).
      - `tests_in_scope`: the test files this task creates or modifies — drives the validator's pairing check. The dispatched subagent's `# Steps` MUST embed the [forge-tdd](../forge-tdd/SKILL.md) `<!-- scaffold:begin -->` / `<!-- scaffold:end -->` block verbatim against these test files.
      - `tdd_exception_ref` (optional): an ADR id from `decisions.md` recorded as a `## TDD Exception: <AC-id>` heading with `Rationale`, `Reviewer`, and `Date` keys. Only with this set may `tests_in_scope` be empty; the rationale lives in the ADR.
-   - Receive subagent summary (≤500 words). Append commit shas to `state.commits[]` with the schema-required fields only — `{ "sha": "...", "phase": "execute", "subject": "...", "logged_at": "..." }`. **Do NOT add a `slice` key** — `state.schema.json` enforces `additionalProperties: false` on `commits[]` and the write will be rejected. Record slice membership in `slice-<N>.summary` instead.
+   - Receive subagent summary (≤500 words). Record each commit via `tools.state.record_commit(path, sha=<sha>, phase="execute", subject=<subject>)` — the helper stamps `logged_at`, schema-validates the entry, and writes through the hook-protected path. **Do NOT** add a `slice` key (or any other extra) — the helper passes the payload through the schema, which enforces `additionalProperties: false` on `commits[]` items. Record slice membership in `slice-<N>.summary` instead. Direct `Write`/`Edit`/`MultiEdit` on `state.json` is refused by the PreToolUse hook.
 3e. After each slice completes:
    - Write `.forge/features/<id>/slice-<N>.summary` with the aggregated wave outputs.
    - Self-review gate per slice: every acceptance criterion mapped to this slice has ≥1 commit; no Negative Requirement violated by the diff.

@@ -51,3 +51,36 @@ def test_body_documents_cross_ai_paste_flag() -> None:
     assert "--cross-ai-paste" in body, (
         "Body must document the --cross-ai-paste flag so users can discover the paste-back path"
     )
+
+
+def test_body_documents_auto_flag_with_real_behavior() -> None:
+    body = _command_body()
+    assert "--auto" in body, (
+        "Body must document the --auto flag so users can discover the auto-mode dispatch path"
+    )
+    auto_index = body.find("--auto")
+    trailing = body[auto_index : auto_index + 200]
+    assert "not implemented" not in trailing, (
+        "Documented --auto flag must describe real behavior, not a not-implemented stub"
+    )
+
+
+def test_body_documents_skip_cost_warn_flag() -> None:
+    body = _command_body()
+    assert "--skip-cost-warn" in body, (
+        "Body must document the --skip-cost-warn flag so users can discover the cost-warn bypass"
+    )
+
+
+def test_body_mentions_dispatch_approved_at_cache_field() -> None:
+    body = _command_body()
+    assert "dispatch_approved_at" in body, (
+        "Body must mention dispatch_approved_at so users understand the per-repo approval cache"
+    )
+
+
+def test_body_mentions_approve_cost_literal_token() -> None:
+    body = _command_body()
+    assert "APPROVE-COST" in body, (
+        "Body must mention the APPROVE-COST literal so users know the cost-warn confirmation token"
+    )

@@ -890,7 +890,10 @@ _FOCUSED_NEXT: dict[str, str | None] = {
 _STANDARD_NEXT: dict[str, str | None] = {
     # 'refine' is intentionally absent — refine is full-tier only and was
     # never supposed to enter the standard pipeline (deep-M-A2). Standard
-    # tier starts at /forge:spec.
+    # tier starts at /forge:spec; the optional research opt-in (seeded via
+    # routing.phase_list at /forge:do --standard --research time) lands the
+    # feature at current_phase="research" and uses the entry below.
+    "research": "/forge:spec",
     "spec": "/forge:scenarios",
     "scenarios": "/forge:plan",
     "plan": "/forge:crucible",
@@ -903,7 +906,8 @@ _STANDARD_NEXT: dict[str, str | None] = {
 
 _FULL_NEXT: dict[str, str | None] = {
     **_STANDARD_NEXT,
-    "refine": "/forge:spec",
+    "refine": "/forge:research",
+    "research": "/forge:spec",
     "spec": "/forge:domain",
     "domain": "/forge:scenarios",
 }

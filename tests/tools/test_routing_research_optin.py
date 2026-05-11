@@ -166,7 +166,7 @@ def test_standard_without_research_opt_in_unchanged(tmp_path: Path) -> None:
     # Legacy behavior: research stays in skipped and phase_list is omitted
     # (lazy-derive returns the 8-entry standard list on read).
     assert payload["skipped"] == [
-        {"phase": "research", "reason": "M3 deferred — manual research acceptable"}
+        {"phase": "research", "reason": "research deferred; manual research acceptable"}
     ]
     assert "phase_list" not in payload["routing"]
 
@@ -274,5 +274,5 @@ def test_focused_without_research_opt_in_unchanged(tmp_path: Path) -> None:
     assert "phase_list" not in payload["routing"]
     # Legacy skip entry survives (focused never runs research).
     assert payload["skipped"] == [
-        {"phase": "research", "reason": "M3 deferred — manual research acceptable"}
+        {"phase": "research", "reason": "research deferred; manual research acceptable"}
     ]

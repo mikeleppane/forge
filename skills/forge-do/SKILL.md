@@ -178,7 +178,7 @@ and dispatches to `/forge:spec`. Standard without `--research` seeds
     - `skipped` is empty when the effective phase list contains
       `research` (full tier, standard with `--research`); otherwise
       `skipped` carries the legacy deferral entry
-      `{"phase": "research", "reason": "M3 deferred — manual research acceptable"}`
+      `{"phase": "research", "reason": "research deferred; manual research acceptable"}`
       so health-validate recognises research as intentionally skipped
       on the focused / standard-without-flag paths.
     - `routing.phase_list` is present and unique-valued on full tier

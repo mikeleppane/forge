@@ -365,12 +365,12 @@ def cleanup_seeded_feature(repo_root: Path, feature_id: str) -> bool:
 
 _FEATURE_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates" / "feature"
 
-# Locked verbatim per M3 spec §5.3.2 step 6 + plan deviation #4.  Surfaces in
-# the seed state.json so health-validate flags `research` as intentionally
-# skipped rather than a missing phase.
+# Skipped-phase marker written into seed state.json so health-validate flags
+# ``research`` as intentionally skipped rather than reading the absent phase
+# block as a missing-step regression.
 _RESEARCH_SKIPPED_ENTRY: dict[str, str] = {
     "phase": "research",
-    "reason": "M3 deferred — manual research acceptable",
+    "reason": "research deferred; manual research acceptable",
 }
 
 # Seed-time entry phases accepted by ``create_feature_folder``.  ``"spec"`` is

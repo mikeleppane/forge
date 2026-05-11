@@ -85,6 +85,11 @@ def test_v1_legacy_feature_resumes_without_phase_list(tmp_path: Path) -> None:
             "spec": {"status": "in_progress", "started_at": "2026-04-15T12:00:00Z"},
         },
         "skipped": [
+            # Legacy on-disk shape: this v1 fixture predates the neutral
+            # skipped-reason swap, so the literal text is preserved
+            # verbatim to keep the backward-compat assertion honest.
+            # Newer features write the neutral string from
+            # ``tools.archive._RESEARCH_SKIPPED_ENTRY`` instead.
             {"phase": "research", "reason": "M3 deferred — manual research acceptable"},
         ],
         "deviations": [],

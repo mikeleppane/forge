@@ -510,3 +510,59 @@ def test_parse_refuses_oversize_file(tmp_path: Path, monkeypatch: pytest.MonkeyP
     path.write_text(_HEADER + ("x" * 256), encoding="utf-8")
     with pytest.raises(lessons.LessonError, match="refuse to parse"):
         lessons.parse(path)
+
+
+def test_append_refuses_concurrent_writer_under_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hold the sidecar lock externally; the second appender must refuse loudly.
+
+    Skipped when ``fcntl`` is unavailable (Windows) — the no-fcntl fallback
+    relies on a different race-narrow check exercised by the next test.
+    """
+    if lessons.fcntl is None:
+        pytest.skip("fcntl unavailable on this platform")
+    lock_path = tmp_path / ".forge" / "intel" / "lessons.md.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    held_fh = lock_path.open("w")
+    lessons.fcntl.flock(held_fh, lessons.fcntl.LOCK_EX | lessons.fcntl.LOCK_NB)
+    try:
+        draft = _make_lesson(id="L001")
+        with pytest.raises(lessons.LessonError, match="another lesson append is in flight"):
+            lessons.append(tmp_path, draft)
+    finally:
+        held_fh.close()
+
+
+def test_append_post_check_refuses_when_slot_was_filled_concurrently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Race narrow: another writer fills the slot between body-build and rename.
+
+    Simulate the race by patching ``next_id`` to return the same slot on the
+    first call (allocator) but a higher slot on the second call (post-check).
+    The post-check inside :func:`append` should detect the drift and refuse
+    rather than silently clobber the concurrent writer's entry.
+    """
+    call_count = {"n": 0}
+
+    def drifting_next_id(repo_root: Path) -> str:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return "L001"  # allocator returns L001 to the appender
+        return "L002"  # post-check sees a concurrent writer took L001
+
+    monkeypatch.setattr(lessons, "next_id", drifting_next_id)
+    # Disable fcntl so the post-check is the only safety net firing.
+    monkeypatch.setattr(lessons, "fcntl", None)
+    # Stop the real atomic_replace from running — we only care that the
+    # post-check raises before it would have been called.
+    monkeypatch.setattr(
+        lessons,
+        "atomic_replace",
+        lambda *_a, **_kw: pytest.fail("atomic_replace must not run on drift detection"),
+    )
+
+    draft = _make_lesson(id="L001", trap="original.")
+    with pytest.raises(lessons.LessonError, match="concurrent append detected"):
+        lessons.append(tmp_path, draft)

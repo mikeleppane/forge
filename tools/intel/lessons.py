@@ -13,9 +13,21 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from types import ModuleType
 from typing import Final, Literal, cast
 
 from tools.constitution_amend import atomic_replace
+
+# fcntl is POSIX-only. Skip the advisory lock when unavailable (Windows) — the
+# rest of the module works regardless; we fall back to a read-and-recheck race
+# narrow at the append call site.
+fcntl: ModuleType | None
+try:
+    import fcntl as _fcntl_mod
+
+    fcntl = _fcntl_mod
+except ModuleNotFoundError:  # pragma: no cover - non-POSIX (Windows)
+    fcntl = None
 
 _TITLE_MAX_LEN: Final[int] = 80
 _TITLE_TRUNCATE_AT: Final[int] = 77
@@ -426,28 +438,75 @@ def append(repo_root: Path, draft: Lesson, *, today: date | None = None) -> Path
     Refuses when ``draft.id`` does not equal :func:`next_id` (caller cannot
     skip a slot). Atomic write via
     :func:`tools.constitution_amend.atomic_replace`.
+
+    Concurrency:
+        Holds an advisory ``fcntl.LOCK_EX | LOCK_NB`` on a sidecar
+        ``.forge/intel/lessons.md.lock`` for the duration of the call so two
+        concurrent appenders cannot both compute the same :func:`next_id` and
+        silently overwrite each other's lesson. The lock is opt-in: when
+        ``fcntl`` is unavailable (Windows), a deliberate single-author retry is
+        substituted — :func:`next_id` is re-derived just before
+        :func:`atomic_replace` and the call refuses with :class:`LessonError`
+        on slot drift instead of clobbering. Either path turns a silent data
+        loss into a loud failure the caller can retry.
     """
     today = today or date.today()
     path = _lessons_path(repo_root)
-    expected = next_id(repo_root)
-    if draft.id != expected:
-        raise LessonError(
-            f"append rejected: draft.id={draft.id!r} but next free slot is "
-            f"{expected!r}; allocator forbids skipping ids"
-        )
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    # Touch the lockfile so flock has something to attach to even on a fresh
+    # repo where lessons.md itself does not exist yet. The lockfile is a
+    # sidecar artefact owned by this writer; safe to create unconditionally.
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fh = None
+    try:
+        if fcntl is not None:
+            lock_fh = lock_path.open("w")
+            try:
+                fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                lock_fh.close()
+                lock_fh = None
+                raise LessonError(
+                    "another lesson append is in flight; retry after the "
+                    "concurrent writer completes"
+                ) from exc
 
-    if path.exists():
-        prior_text = _read_lessons_file(path)
-        # parse() already ran inside next_id(); reuse the file body verbatim.
-        new_text = _append_to_body(prior_text, draft)
-    else:
-        header = _DEFAULT_HEADER.format(created=today.isoformat())
-        new_text = header + _serialize_lesson(draft)
+        expected = next_id(repo_root)
+        if draft.id != expected:
+            raise LessonError(
+                f"append rejected: draft.id={draft.id!r} but next free slot is "
+                f"{expected!r}; allocator forbids skipping ids"
+            )
 
-    # Round-trip validation: ensure the merged body still parses cleanly.
-    parse_text(new_text)
-    atomic_replace(path, new_text)
-    return path
+        if path.exists():
+            prior_text = _read_lessons_file(path)
+            # parse() already ran inside next_id(); reuse the file body verbatim.
+            new_text = _append_to_body(prior_text, draft)
+        else:
+            header = _DEFAULT_HEADER.format(created=today.isoformat())
+            new_text = header + _serialize_lesson(draft)
+
+        # Round-trip validation: ensure the merged body still parses cleanly.
+        parse_text(new_text)
+
+        # Race narrow for the no-fcntl fallback path. Re-derive next_id once
+        # more between the body build and the rename; on slot drift refuse
+        # to clobber. Under fcntl this check is a defensive belt-and-braces
+        # — the exclusive lock already guarantees no concurrent writer
+        # advanced the file.
+        post_expected = next_id(repo_root)
+        if post_expected != expected:
+            raise LessonError(
+                f"concurrent append detected: slot {expected!r} was filled by "
+                f"another writer (next free now {post_expected!r}); retry "
+                "append after re-deriving next_id"
+            )
+
+        atomic_replace(path, new_text)
+        return path
+    finally:
+        if lock_fh is not None:
+            lock_fh.close()
 
 
 def _append_to_body(prior_text: str, draft: Lesson) -> str:

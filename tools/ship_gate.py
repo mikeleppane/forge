@@ -68,6 +68,12 @@ _VALID_STATUS_VALUES: frozenset[str] = frozenset({"open", "resolved", "accepted-
 # loud — a `severity='Lo'` on a CRITICAL-tagged row otherwise silently bypassed
 # the gate via the old `severity in {BLOCK,HIGH,MEDIUM}` short-circuit.
 _VALID_SEVERITY_VALUES: frozenset[str] = frozenset({"BLOCK", "HIGH", "MEDIUM", "LOW"})
+# `Resolved by` vocabulary: 40-hex SHA, the literal `spec-edit` / `plan-edit`,
+# or `accepted-risk:<reason>` where <reason> is any non-empty trailing text.
+# Empty cells are tolerated and surface as ``resolved_by=None``; this pattern
+# only runs against non-empty cells. The 40-hex form is what the trap-memory
+# harvest path keys on; the literals carry no SHA so harvest skips them.
+_VALID_RESOLVED_BY_PATTERN = re.compile(r"^([0-9a-f]{40}|spec-edit|plan-edit|accepted-risk:.+)$")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -76,6 +82,7 @@ class ShipFinding:
 
     article_id: str | None
     severity: str  # BLOCK|HIGH|MEDIUM|LOW
+    resolved_by: str | None = None
     location: str
     message: str
 
@@ -114,7 +121,12 @@ def parse_review_findings(path: Path) -> list[ShipFinding]:
     ``ShipGateError`` so a typo cannot silently filter the row. Severity
     cells must come from the closed ``{BLOCK, HIGH, MEDIUM, LOW}`` vocabulary
     (REVIEW.md template); typos and case mismatches raise ``ShipGateError``
-    instead of silently bypassing the gate.
+    instead of silently bypassing the gate. The optional ``Resolved by``
+    column is also tolerated: missing column → every emitted
+    ``ShipFinding`` carries ``resolved_by=None``; present-but-empty cell →
+    ``resolved_by=None``; present-and-populated cell must match the
+    ``{40-hex SHA, spec-edit, plan-edit, accepted-risk:<reason>}``
+    vocabulary or ``ShipGateError`` is raised.
 
     Asymmetry vs ``validate_deviations``: short or malformed ``| F-`` rows
     are silently skipped (``continue``) here, whereas the deviation
@@ -132,8 +144,8 @@ def parse_review_findings(path: Path) -> list[ShipFinding]:
         entry per tag in each matching row.
 
     Raises:
-        ShipGateError: When a row's Status or Severity cell holds an
-            unrecognized value.
+        ShipGateError: When a row's Status, Severity, or Resolved by cell
+            holds an unrecognized value.
     """
     if not path.exists():
         return []
@@ -168,12 +180,26 @@ def parse_review_findings(path: Path) -> list[ShipFinding]:
         status_col = header.index("Status")
     except ValueError:
         status_col = -1  # legacy layout; treat all rows as open
+    try:
+        resolved_by_col = header.index("Resolved by")
+    except ValueError:
+        # Legacy pre-trap-memory layout: column absent, every emitted
+        # ShipFinding carries ``resolved_by=None``.
+        resolved_by_col = -1
 
     out: list[ShipFinding] = []
     for line in lines[header_idx + 1 :]:
         if not line.startswith("| F-"):
             continue
-        out.extend(_findings_from_row(line, header=header, status_col=status_col, source=path))
+        out.extend(
+            _findings_from_row(
+                line,
+                header=header,
+                status_col=status_col,
+                resolved_by_col=resolved_by_col,
+                source=path,
+            )
+        )
     return out
 
 
@@ -182,6 +208,7 @@ def _findings_from_row(
     *,
     header: list[str],
     status_col: int,
+    resolved_by_col: int,
     source: Path,
 ) -> list[ShipFinding]:
     """Yield zero or more ShipFinding rows from a single `| F-...` table line.
@@ -205,7 +232,10 @@ def _findings_from_row(
     # gate). An untagged row with an unusual Status (e.g. "in-progress" or a
     # typo) is reviewer convergence-history that this parser can ignore;
     # validating its Status would raise ShipGateError on rows the gate
-    # never cared about in the first place.
+    # never cared about in the first place. The Resolved by vocabulary is
+    # also gated behind the tag check for the same reason — an authoring
+    # typo on an untagged row must not break a parse the gate never cared
+    # about in the first place.
     tag_ids = _TAG_RE.findall(message)
     if not tag_ids:
         return []
@@ -220,12 +250,26 @@ def _findings_from_row(
     # lets `partition_by_article_level` route purely on article level.
     if severity not in _VALID_SEVERITY_VALUES:
         raise ShipGateError(f"unrecognized Severity value: {severity!r} in {source}")
+    # Resolved by is optional. Column absent → resolved_by=None (legacy
+    # layout). Column present but cell empty → resolved_by=None. Column
+    # present with content → must match the 40-hex SHA / spec-edit / plan-edit
+    # / accepted-risk:<reason> vocabulary or we raise.
+    resolved_by: str | None = None
+    if resolved_by_col >= 0:
+        resolved_by_raw = cells[resolved_by_col].strip()
+        if resolved_by_raw:
+            if not _VALID_RESOLVED_BY_PATTERN.match(resolved_by_raw):
+                raise ShipGateError(
+                    f"unrecognized Resolved by value: {resolved_by_raw!r} in {source}"
+                )
+            resolved_by = resolved_by_raw
     # findall keeps every tag in declaration order; one ShipFinding per tag
     # so each routes through partition_by_article_level on its own merits.
     return [
         ShipFinding(
             article_id=article_id,
             severity=severity,
+            resolved_by=resolved_by,
             location=location,
             message=message,
         )

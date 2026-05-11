@@ -636,3 +636,264 @@ Quoting an example: `| F-1 | HIGH | open | src/x.py | [constitution:A1] x | fix 
         encoding="utf-8",
     )
     assert sg.parse_review_findings(src) == []
+
+
+# --- Resolved by column (WS3 slice 4) -------------------------------------
+#
+# The trap-memory harvest hook needs a deterministic signal for which findings
+# convert into lessons. The `Resolved by` column carries that signal:
+#   - empty                       → no resolution recorded
+#   - 40-hex SHA                  → fix landed in this commit (harvest candidate)
+#   - spec-edit / plan-edit       → resolution lived outside the code
+#   - accepted-risk:<reason>      → exception logged in decisions.md
+# Legacy review files (no column) are tolerated for backwards compat; every
+# emitted ShipFinding from those files carries `resolved_by=None`.
+
+
+def test_parse_review_findings_legacy_layout_has_resolved_by_none() -> None:
+    """Pre-trap-memory review files have no `Resolved by` column → field None."""
+    findings = sg.parse_review_findings(FIXTURES / "review_with_critical_finding.md")
+    assert findings, "fixture must yield at least one tagged finding"
+    assert all(f.resolved_by is None for f in findings)
+
+
+def test_parse_review_findings_populates_resolved_by_for_sha_on_open_row(
+    tmp_path: Path,
+) -> None:
+    """40-hex SHA cell is preserved verbatim on the emitted ShipFinding.
+
+    An `open`-status row with a populated `Resolved by` is odd but permitted —
+    a reviewer may pre-populate the cell with a proposed commit before
+    flipping Status to `resolved`. The parser passes the value through; the
+    `Status: open` filter still surfaces the row.
+    """
+    src = tmp_path / "review_with_sha.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | 1a2b3c4d5e6f7890abcdef1234567890abcdef12 | src/x.py:1 | [constitution:A1] tag here | fix | self |
+""",
+        encoding="utf-8",
+    )
+    findings = sg.parse_review_findings(src)
+    assert len(findings) == 1
+    assert findings[0].resolved_by == "1a2b3c4d5e6f7890abcdef1234567890abcdef12"
+
+
+def test_parse_review_findings_empty_resolved_by_cell_is_none(tmp_path: Path) -> None:
+    """Empty `Resolved by` cell on a tagged row → `resolved_by=None`."""
+    src = tmp_path / "review_empty_resolved_by.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open |  | src/x.py:1 | [constitution:A1] tag here | fix | self |
+""",
+        encoding="utf-8",
+    )
+    findings = sg.parse_review_findings(src)
+    assert len(findings) == 1
+    assert findings[0].resolved_by is None
+
+
+def test_parse_review_findings_accepts_spec_edit_resolution(tmp_path: Path) -> None:
+    src = tmp_path / "review_spec_edit.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | spec-edit | src/x.py:1 | [constitution:A1] tag here | fix | self |
+""",
+        encoding="utf-8",
+    )
+    findings = sg.parse_review_findings(src)
+    assert len(findings) == 1
+    assert findings[0].resolved_by == "spec-edit"
+
+
+def test_parse_review_findings_accepts_plan_edit_resolution(tmp_path: Path) -> None:
+    src = tmp_path / "review_plan_edit.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | plan-edit | src/x.py:1 | [constitution:A1] tag here | fix | self |
+""",
+        encoding="utf-8",
+    )
+    findings = sg.parse_review_findings(src)
+    assert len(findings) == 1
+    assert findings[0].resolved_by == "plan-edit"
+
+
+def test_parse_review_findings_accepts_accepted_risk_resolution(tmp_path: Path) -> None:
+    """`accepted-risk:<reason>` preserves the trailing reason verbatim."""
+    src = tmp_path / "review_accepted_risk.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | accepted-risk:legacy module out of scope | src/x.py:1 | [constitution:A1] tag here | fix | self |
+""",
+        encoding="utf-8",
+    )
+    findings = sg.parse_review_findings(src)
+    assert len(findings) == 1
+    assert findings[0].resolved_by == "accepted-risk:legacy module out of scope"
+
+
+def test_parse_review_findings_raises_on_unknown_resolved_by_value(tmp_path: Path) -> None:
+    """`unknown` is not a recognized resolution method — must raise."""
+    src = tmp_path / "review_bad_resolved_by.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | unknown | src/x.py:1 | [constitution:A1] tag here | fix | self |
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(sg.ShipGateError, match="unrecognized Resolved by"):
+        sg.parse_review_findings(src)
+
+
+def test_parse_review_findings_raises_on_truncated_sha_resolved_by(tmp_path: Path) -> None:
+    """A 7-char SHA is not the 40-hex full form the vocabulary requires."""
+    src = tmp_path / "review_short_sha.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | 1a2b3c4 | src/x.py:1 | [constitution:A1] tag here | fix | self |
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(sg.ShipGateError, match="unrecognized Resolved by"):
+        sg.parse_review_findings(src)
+
+
+def test_parse_review_findings_skips_untagged_row_with_bad_resolved_by(tmp_path: Path) -> None:
+    """Tag-check-first discipline: an untagged row with a bad Resolved by
+    value must NOT raise. The harvest hook only cares about tagged rows;
+    forcing the gate to fail over reviewer convergence-history on an
+    untagged row would block ship over noise the gate never read.
+    """
+    src = tmp_path / "review_untagged_bad_resolved_by.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | totally-bogus | src/x.py:1 | no constitution tag here | strip | self |
+""",
+        encoding="utf-8",
+    )
+    # Untagged row → never gate-eligible → Resolved by typo must not raise.
+    assert sg.parse_review_findings(src) == []
+
+
+def test_parse_review_findings_multi_tag_row_shares_resolved_by(tmp_path: Path) -> None:
+    """Multi-tag rows emit one ShipFinding per tag, all carrying the same
+    Resolved by value — a single resolution covers every tag in the cell.
+    """
+    src = tmp_path / "review_multi_tag_resolved_by.md"
+    src.write_text(
+        """---
+spec: 2026-05-07-demo
+target: code
+status: open
+cycles: 1
+---
+
+# Findings
+
+| ID | Severity | Status | Resolved by | Location | Problem | Recommended Fix | Source |
+|----|----------|--------|-------------|----------|---------|-----------------|--------|
+| F-1 | HIGH | open | 1a2b3c4d5e6f7890abcdef1234567890abcdef12 | src/x.py:1 | [constitution:A4] [constitution:A1] dual tag | fix | self |
+""",
+        encoding="utf-8",
+    )
+    findings = sg.parse_review_findings(src)
+    article_ids = sorted(f.article_id for f in findings if f.article_id)
+    assert article_ids == ["A1", "A4"]
+    assert {f.resolved_by for f in findings} == {"1a2b3c4d5e6f7890abcdef1234567890abcdef12"}
+
+
+def test_ship_finding_default_resolved_by_is_none() -> None:
+    """Existing call sites that build ShipFinding without resolved_by stay valid.
+
+    The dataclass field defaults to None so legacy constructors (every test
+    above this block, every production call site outside the parser) compile
+    and behave as before.
+    """
+    finding = sg.ShipFinding(
+        article_id="A1",
+        severity="HIGH",
+        location="src/x.py:1",
+        message="[constitution:A1] x",
+    )
+    assert finding.resolved_by is None

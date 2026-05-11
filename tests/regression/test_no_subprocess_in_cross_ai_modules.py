@@ -10,13 +10,15 @@ attr=...))`` so an alias rename (``import subprocess as sp``) would slip
 this guard, but the audited modules ship with neither alias nor direct
 use; the cheap check catches the regression we care about.
 
-Hand-off note: a future auto-mode dispatcher is the single module
-allowed to spawn external CLIs. When it lands as
-``tools/cross_ai/dispatch.py`` this guard should be relaxed to exclude
-that file from the walk (or inverted to assert dispatch is the *only*
-module inside ``tools/cross_ai/`` that subprocess-calls). The dispatch
-module is intentionally absent today; its presence here would itself be
-a regression.
+Allowed modules: ``dispatch.py`` is the single module under
+``tools/cross_ai/`` that may spawn external CLIs (the auto-mode
+reviewer dispatcher). It is exempted via
+:data:`_DISPATCH_ALLOWED_MODULES` below; the prompt builder
+(``prompt.py``) is exempted via :data:`_PROMPT_BUILDER_BYPASS` because
+its ``git diff`` shell-out is a documented behavior. Every other
+module under the directory must remain subprocess-free so the
+manual-mode helpers cannot regress into invoking external commands
+through the back door.
 """
 
 from __future__ import annotations
@@ -29,12 +31,13 @@ _REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 _CROSS_AI_DIR: Path = _REPO_ROOT / "tools" / "cross_ai"
 
 # Modules in ``tools/cross_ai/`` that are allowed to invoke subprocess.
-# Empty today; a future auto-mode dispatcher will be added here when
-# it ships. The prompt builder (which does shell out to ``git`` for the
-# code-target diff) lives in this directory and IS exempt via
+# ``dispatch.py`` is the auto-mode reviewer dispatcher and is the only
+# module here whose explicit purpose is to spawn an external CLI. The
+# prompt builder (which shells out to ``git`` for the code-target
+# diff) lives in this directory and IS exempt via
 # :data:`_PROMPT_BUILDER_BYPASS` — see the function below for the
 # rationale.
-_DISPATCH_ALLOWED_MODULES: frozenset[str] = frozenset()
+_DISPATCH_ALLOWED_MODULES: frozenset[str] = frozenset({"dispatch.py"})
 
 # Banned attribute calls — ``(module, attr)`` pairs whose ``ast.Call``
 # shape we refuse anywhere under ``tools/cross_ai/`` (modulo the
@@ -115,14 +118,21 @@ def test_no_subprocess_calls_in_manual_mode_modules() -> None:
     )
 
 
-def test_dispatch_module_is_absent() -> None:
-    """``tools/cross_ai/dispatch.py`` is reserved for a future increment.
+def test_dispatch_module_is_present_and_subprocess_bound() -> None:
+    """``tools/cross_ai/dispatch.py`` exists AND is the subprocess carve-out.
 
-    Its presence today would mean auto-mode landed without the guard
-    being relaxed in the same change — flag it as a regression.
+    Inverts the previous absence guard: the dispatcher has shipped, so
+    its file must exist and the allow-list must name it. This keeps
+    the relaxation visible the moment any future cleanup tries to
+    delete the module without simultaneously tightening the
+    allow-list.
     """
     dispatch_path = _CROSS_AI_DIR / "dispatch.py"
-    assert not dispatch_path.exists(), (
-        f"unexpected dispatch module: {dispatch_path} — "
-        "if auto mode is shipping, relax _DISPATCH_ALLOWED_MODULES in this guard"
+    assert dispatch_path.exists(), (
+        f"missing dispatch module: {dispatch_path} — "
+        "auto-mode dispatch is no longer reserved; the file must ship"
+    )
+    assert "dispatch.py" in _DISPATCH_ALLOWED_MODULES, (
+        "dispatch.py must remain in _DISPATCH_ALLOWED_MODULES — "
+        "removing it would let the no-subprocess guard re-flag the dispatcher"
     )

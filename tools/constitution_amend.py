@@ -1114,7 +1114,14 @@ _DUPLICATE_TRIGGER_COUNT = 2
 
 
 def _check_draft_frontmatter(text: str) -> None:
-    """Raise ``AmendError`` if frontmatter lacks a valid ``version:`` or ``created:``."""
+    """Raise ``AmendError`` if frontmatter lacks a valid ``version:`` or ``created:``.
+
+    The ``created:`` check goes beyond a shape match — the captured date string
+    is parsed via :meth:`datetime.date.fromisoformat` so calendar-invalid values
+    (``2026-13-99``, ``2026-02-30``, ``2025-02-29`` on a non-leap year) are
+    rejected here instead of leaking into a bootstrap Constitution whose
+    frontmatter schema would still nominally pass a regex-only check.
+    """
     try:
         fm, _ = _split_frontmatter(text)
     except AmendError as exc:
@@ -1123,10 +1130,49 @@ def _check_draft_frontmatter(text: str) -> None:
         raise AmendError(
             "draft frontmatter missing or malformed `version:` (expected semver MAJOR.MINOR.PATCH)"
         )
-    if not _FRONTMATTER_CREATED_RE.search(fm):
+    created_match = _FRONTMATTER_CREATED_RE.search(fm)
+    if not created_match:
         raise AmendError(
             'draft frontmatter missing or malformed `created:` (expected "YYYY-MM-DD")'
         )
+    try:
+        date.fromisoformat(created_match.group(1))
+    except ValueError as exc:
+        raise AmendError(
+            f"draft frontmatter `created:` is not a real calendar date: "
+            f"{created_match.group(1)!r} ({exc})"
+        ) from exc
+
+
+def _check_article_numbering(articles: list[Article]) -> None:
+    """Raise ``AmendError`` when article numbering is non-monotonic or has gaps.
+
+    Articles must be numbered ``1, 2, 3, ...`` with no duplicates and no gaps.
+    A draft authored by hand with renumbered articles (after a deletion or
+    insertion) commonly violates this; catching it at draft validation surfaces
+    one message instead of bouncing through the structural validator inside
+    :func:`persist_drafted_constitution`.
+
+    Mirrors the wording of
+    :func:`tools.validate.constitution._check_article_numbering` so the
+    user-facing experience is identical whether the failure surfaces at
+    draft-time or structural-time. Duplicate detection lives in
+    :func:`_check_draft_articles` directly; this helper assumes the caller
+    has already rejected duplicates so the gap/monotonic check only has to
+    reason about strictly-increasing-or-not sequences.
+    """
+    expected = 1
+    for article in articles:
+        actual = int(article.id[1:])  # "A5" -> 5
+        if actual < expected:
+            raise AmendError(
+                f"draft article numbers not monotonic: expected {expected}, found {actual}"
+            )
+        if actual > expected:
+            raise AmendError(
+                f"draft article numbering gap: expected A{expected}, got {article.id!r}"
+            )
+        expected = actual + 1
 
 
 def _check_draft_articles(articles: list[Article]) -> None:
@@ -1152,6 +1198,11 @@ def _check_draft_articles(articles: list[Article]) -> None:
             duplicates.append(article.id)
     if duplicates:
         raise AmendError(f"draft has duplicate article numbers: {sorted(duplicates)}")
+
+    # Monotonic + gap check runs after duplicate detection so a duplicate
+    # surfaces with its own message; non-duplicate ordering issues
+    # (`A5` before `A2`, or a gap at `A2`) reach this branch.
+    _check_article_numbering(articles)
 
     over_cap = [(a.id, a.body_words) for a in articles if a.body_words > MAX_INJECTED_WORDS]
     if over_cap:

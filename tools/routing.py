@@ -55,7 +55,7 @@ from tools.archive import (
 )
 from tools.state import (
     VALID_TIERS,
-    _derive_phase_list,
+    derive_phase_list,
     feature_folder_exists,
     record_routing_decision,
 )
@@ -99,13 +99,13 @@ def _resolve_seed_lifecycle(
         # ``flow_version`` is not seeded in the template, so the lazy default
         # (v1/v2) yields the 11-entry pre-v3 list. The qa entry only joins
         # when the feature later opts into v3.
-        full_list = _derive_phase_list(tier="full")
+        full_list = derive_phase_list(tier="full")
         return "refine", full_list, "research" not in full_list
     if final_tier == "standard" and research_opt_in:
         # Standard with --research prepends ``research`` to the standard
         # 8-phase list, yielding a 9-entry sequence starting with research.
         # uniqueItems holds because the standard list never carries research.
-        std_list = ["research", *_derive_phase_list(tier="standard")]
+        std_list = ["research", *derive_phase_list(tier="standard")]
         return "research", std_list, False
     # Focused (no flag, since the focused+flag refusal already raised) and
     # standard without --research both ride the legacy spec entry; the

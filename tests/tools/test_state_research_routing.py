@@ -43,14 +43,14 @@ def test_focused_tier_does_not_advance_research() -> None:
 
 
 def test_derive_phase_list_full_includes_research_pre_v3() -> None:
-    phases = state._derive_phase_list(tier="full", flow_version=1)
+    phases = state.derive_phase_list(tier="full", flow_version=1)
     assert "research" in phases
     assert phases.index("research") == phases.index("refine") + 1
     assert phases.index("research") == phases.index("spec") - 1
 
 
 def test_derive_phase_list_full_includes_research_v3() -> None:
-    phases = state._derive_phase_list(tier="full", flow_version=3)
+    phases = state.derive_phase_list(tier="full", flow_version=3)
     assert "research" in phases
     assert phases[-1] == "qa"
 
@@ -58,11 +58,11 @@ def test_derive_phase_list_full_includes_research_v3() -> None:
 def test_derive_phase_list_standard_excludes_research() -> None:
     """Standard-tier lazy-derive ships the 8-phase shape without research;
     the --research opt-in writes routing.phase_list explicitly to insert it."""
-    phases = state._derive_phase_list(tier="standard")
+    phases = state.derive_phase_list(tier="standard")
     assert "research" not in phases
     assert phases[0] == "spec"
 
 
 def test_derive_phase_list_focused_excludes_research() -> None:
-    phases = state._derive_phase_list(tier="focused")
+    phases = state.derive_phase_list(tier="focused")
     assert "research" not in phases

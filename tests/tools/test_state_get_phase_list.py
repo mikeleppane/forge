@@ -191,4 +191,4 @@ def test_routing_not_a_dict_returns_none() -> None:
 
 def test_derive_phase_list_unknown_tier_raises_state_error() -> None:
     with pytest.raises(state.StateError, match="unknown tier"):
-        state._derive_phase_list(tier="bogus")
+        state.derive_phase_list(tier="bogus")

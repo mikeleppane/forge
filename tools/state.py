@@ -83,7 +83,7 @@ _PHASE_LIST_FULL_PRE_V3: Final[tuple[str, ...]] = (
 _PHASE_LIST_FULL_V3: Final[tuple[str, ...]] = (*_PHASE_LIST_FULL_PRE_V3, "qa")
 
 
-def _derive_phase_list(*, tier: str, flow_version: int | None = None) -> list[str]:
+def derive_phase_list(*, tier: str, flow_version: int | None = None) -> list[str]:
     """Return the canonical lifecycle phase list for ``(tier, flow_version)``.
 
     Pure transformation. Does no I/O and reads no payload state. Callers
@@ -132,7 +132,7 @@ def get_phase_list(payload: dict[str, Any]) -> list[str] | None:
        ``list(...)`` copy of it (defensive against caller mutation).
     3. Otherwise look up ``tier = payload['tier']``; when ``tier`` is in
        ``VALID_TIERS``, derive the canonical list via
-       ``_derive_phase_list``. Unknown tier (or absent tier) → ``None``.
+       :func:`derive_phase_list`. Unknown tier (or absent tier) → ``None``.
 
     Args:
         payload: Parsed ``state.json`` mapping.
@@ -155,7 +155,7 @@ def get_phase_list(payload: dict[str, Any]) -> list[str] | None:
             if isinstance(flow_version, int) and not isinstance(flow_version, bool)
             else None
         )
-        return _derive_phase_list(tier=tier, flow_version=fv)
+        return derive_phase_list(tier=tier, flow_version=fv)
     return None
 
 

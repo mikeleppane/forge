@@ -155,10 +155,8 @@ sequential `AskUserQuestion` contract holds.
 
 ## Sequential-question contract (locked)
 
-This skill follows the **one-question-per-turn** pattern locked under
-WS1's *User interaction pattern (locked — from SDD workshop L1)* in
-`docs/plans/2026-05-11-conventions-trap-memory-design.md`. The same
-pattern already governs `skills/forge-refine/SKILL.md` step 6a,
+This skill follows the **one-question-per-turn** pattern that already
+governs `skills/forge-refine/SKILL.md` step 6a,
 `skills/forge-crucible/SKILL.md` Adversarial Q&A,
 `skills/forge-bootstrap-constitution/SKILL.md` steps 2 / 5 / 6, and
 `skills/forge-resync-agents/SKILL.md`.
@@ -177,7 +175,7 @@ Six sequential question points exist in this skill, each its own
 
 Batched multi-question prompts are forbidden in this skill. Forcing the
 user to answer a numbered list at once raises cognitive load and skews
-answers toward "say yes to all to move on" (workshop L1).
+answers toward "say yes to all to move on."
 
 ## Failure modes
 

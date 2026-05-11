@@ -18,12 +18,11 @@ Behaviour by flag:
 
 - **Without flags** — feature ship (default). Run the existing
   feature-ship lifecycle below: validate phase=ship, parse REVIEW.code.md,
-  apply Constitution gate, call `tools.archive.ship_feature`. This is the
-  M2/M3-P3 path; no behaviour change.
+  apply Constitution gate, call `tools.archive.ship_feature`.
 - **With `--change <change_id>`** — delta merge. Skip the entire feature
   lifecycle and dispatch to the delta-merge subroutine below. The
-  Constitution gate (P3 §5.3.9) does NOT apply — there is no feature
-  folder, no REVIEW.code.md, no `articles[]` to surface.
+  Constitution gate does NOT apply — there is no feature folder, no
+  REVIEW.code.md, no `articles[]` to surface.
 - **With `--promote-domain`** — feature-ship lifecycle runs unchanged.
   After `tools.archive.ship_feature` returns successfully, an advisory
   glossary-promotion step fires against the archived feature path.
@@ -129,7 +128,7 @@ Promote a verified feature to a canonical capability and move the feature folder
      - User types `ACKNOWLEDGE` (literal uppercase): build the ack hook via `ack_hook = tools.ship_gate.make_acknowledgement_hook(state_path=..., decisions_path=..., gate_findings=gate, articles=articles, lessons=lessons)` and **carry it into step 4** — do NOT call ack_hook here.
      - Anything else: abort ship with the user's choice surfaced; halt without state mutation.
    - When `gate` is empty: continue to step 3.55 with `ack_hook = None`.
-3.55 **Ship-time git-conventions gate (WS2).**
+3.55 **Ship-time git-conventions gate.**
    - Evaluate against the feature's `state.commits[]`:
      `partition = tools.ship_gate.evaluate_git_conventions_gate(.forge/features/<id>/)`.
    - When `partition.warn` is non-empty: print `tools.ship_gate.render_git_conventions_warn_summary(partition)` and continue (MEDIUM findings are advisory; ship is not blocked).

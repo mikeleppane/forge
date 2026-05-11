@@ -1,4 +1,4 @@
-"""Constitution ship-time gate (M3 spec §5.3.9 / D-4a).
+"""Constitution + trap-memory ship-time gate.
 
 Four pure functions:
 
@@ -129,8 +129,8 @@ def _parse_table_columns(line: str) -> list[str]:
 def parse_review_findings(path: Path) -> list[ShipFinding]:
     """Parse REVIEW.code.md for ``Status: open`` findings tagged ``[constitution:A<n>]``.
 
-    Resolved or accepted-risk rows are convergence-history (Open Scoping #15)
-    and skipped — the §5.3.9 gate acts on unresolved findings only.
+    Resolved or accepted-risk rows are convergence-history and skipped —
+    the gate acts on unresolved findings only.
 
     Multi-tag rows: a `Problem` cell may carry more than one
     ``[constitution:A<n>]`` tag (e.g. one finding violates two articles, or a
@@ -522,7 +522,7 @@ def render_gate_prompt(
         "=" * 57,
         "",
         f"The reviewer flagged {len(gate)} finding(s) against project Constitution",
-        "articles or trap-memory lessons. M3 does not BLOCK on these - you are the gate.",
+        "articles or trap-memory lessons. The gate does not BLOCK - you are the gate.",
         "",
     ]
     for f in gate:
@@ -810,7 +810,7 @@ def make_acknowledgement_hook(
     return _record
 
 
-# --- git-conventions wiring (WS2) -----------------------------------------
+# --- git-conventions wiring -----------------------------------------------
 #
 # The forge-ship orchestrator routes git-convention findings through these
 # helpers so it never has to know the validator's import path or the bucket

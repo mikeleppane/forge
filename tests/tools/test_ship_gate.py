@@ -291,7 +291,7 @@ def test_ack_hook_recovers_from_state_write_failure(
 
 
 def test_render_gate_prompt_raises_on_unknown_article_id() -> None:
-    """L1 — defense in depth: gate-bucket findings must reference known articles.
+    """Defense in depth: gate-bucket findings must reference known articles.
 
     `partition_by_article_level` already routes unknown article ids to info
     so this path is unreachable in production. The assertion documents the
@@ -583,7 +583,7 @@ def test_ack_hook_raises_ship_gate_error_on_corrupt_state_json(tmp_path: Path) -
 
 
 def test_parse_review_findings_skips_untagged_rows_with_unusual_status(tmp_path: Path) -> None:
-    """M3 — Status vocab check applies only to constitution-tagged rows.
+    """Status vocab check applies only to constitution-tagged rows.
 
     Pre-fix, the Status validity check ran BEFORE the tag check, so an
     untagged row with a typo Status (e.g. `In progress`) raised
@@ -638,7 +638,7 @@ Quoting an example: `| F-1 | HIGH | open | src/x.py | [constitution:A1] x | fix 
     assert sg.parse_review_findings(src) == []
 
 
-# --- Resolved by column (WS3 slice 4) -------------------------------------
+# --- Resolved by column ---------------------------------------------------
 #
 # The trap-memory harvest hook needs a deterministic signal for which findings
 # convert into lessons. The `Resolved by` column carries that signal:
@@ -899,7 +899,7 @@ def test_ship_finding_default_resolved_by_is_none() -> None:
     assert finding.resolved_by is None
 
 
-# --- Lesson-kind ShipFinding + partitioner + renderer (WS3 slice 5) -------
+# --- Lesson-kind ShipFinding + partitioner + renderer --------------------
 #
 # Reviewer subagents tag lesson-trap violations with [lesson:L<NNN>] in the
 # REVIEW.md Problem cell. Those flow through the same parser as constitution

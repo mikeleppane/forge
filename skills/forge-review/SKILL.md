@@ -170,7 +170,7 @@ The plain name `.forge/features/<id>/REVIEW.md` is reserved (do not write it). D
 
    Each candidate is processed in its own `AskUserQuestion` turn — no
    batched "harvest all" prompt. The sequential pattern matches the
-   rest of FORGE's user interactions (workshop L1).
+   rest of FORGE's user interactions.
 8. **Self-review gate:** `REVIEW.<target>.md` status is `resolved` AND no BLOCK findings remain unresolved.
 9. **Record target completion.** Call `tools.state.complete_review_target(path, review_target=<plan|code>)` so `phases.review.targets_done` records this pass. Idempotent within the same target.
 10. **Transition state — depends on target:**

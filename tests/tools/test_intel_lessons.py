@@ -521,6 +521,24 @@ def test_parse_refuses_oversize_trap_field(tmp_path: Path) -> None:
         lessons.parse(path)
 
 
+def test_parse_error_includes_source_line_number(tmp_path: Path) -> None:
+    """Per-block parser errors must name the source line of the offending header.
+
+    The template prelude is 6 lines (frontmatter + heading + blank); the
+    second lesson header therefore lands on line 17 in this fixture. The
+    line number gives authors a direct navigation target instead of forcing
+    them to grep for the lesson id by hand.
+    """
+    body = _file(
+        _entry(nid="L001"),
+        _entry(nid="L002", severity="WARN"),  # bad severity on the second entry
+    )
+    path = _write(tmp_path / "lessons.md", body)
+    with pytest.raises(lessons.LessonError, match=r"line \d+ lesson L002") as exc:
+        lessons.parse(path)
+    assert "Severity" in str(exc.value)
+
+
 def test_parse_refuses_oversize_avoidance_field(tmp_path: Path) -> None:
     """Avoidance longer than the 1000-char cap blocks parse."""
     long_avoidance = "y" * 1001

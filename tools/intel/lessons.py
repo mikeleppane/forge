@@ -194,12 +194,16 @@ def parse(path: Path) -> list[Lesson]:
 
 
 def parse_text(text: str) -> list[Lesson]:
-    """In-memory counterpart to :func:`parse`. Same validation rules."""
+    """In-memory counterpart to :func:`parse`. Same validation rules.
+
+    Per-block error messages include the 1-based source line of the lesson
+    header so authors can navigate to the offending entry directly.
+    """
     scrubbed = _strip_code_regions(text)
     state = _ParseState()
     blocks: list[dict[str, object]] = []
-    for raw_line in scrubbed.splitlines():
-        _consume_line(raw_line, state, blocks)
+    for line_idx, raw_line in enumerate(scrubbed.splitlines(), start=1):
+        _consume_line(raw_line, state, blocks, line_no=line_idx)
     if state.current is not None:
         blocks.append(state.current)
 
@@ -212,14 +216,18 @@ def _consume_line(
     line: str,
     state: _ParseState,
     blocks: list[dict[str, object]],
+    *,
+    line_no: int,
 ) -> None:
     if line.startswith("## L"):
         match = _HEADER_RE.match(line)
         if not match:
-            raise LessonError(f"malformed lesson header: {line!r}")
+            raise LessonError(f"line {line_no}: malformed lesson header: {line!r}")
         lesson_id = match.group(1)
         if not _ID_RE.match(lesson_id):
-            raise LessonError(f"malformed lesson id {lesson_id!r}: expected L<NNN> zero-padded")
+            raise LessonError(
+                f"line {line_no}: malformed lesson id {lesson_id!r}: expected L<NNN> zero-padded"
+            )
         if state.current is not None:
             blocks.append(state.current)
         state.current = {
@@ -232,6 +240,7 @@ def _consume_line(
             "tags": "",
             "severity": "",
             "status": "",
+            "_header_line": line_no,
         }
         state.active_field = None
         return
@@ -263,52 +272,53 @@ def _consume_line(
 
 def _block_to_lesson(block: dict[str, object]) -> Lesson:
     lesson_id = _expect_str(block, "id")
+    # The header-line number is stamped into the block by _consume_line so
+    # every per-block error message can point the author at the source row.
+    header_line = block.get("_header_line", "?")
+    prefix = f"line {header_line} lesson {lesson_id}"
 
     for field in _REQUIRED_FIELDS:
         value = block.get(field, "")
         if not isinstance(value, str) or not value.strip():
             raise LessonError(
-                f"lesson {lesson_id}: missing required field "
-                f"`{field.replace('_', ' ').capitalize()}`"
+                f"{prefix}: missing required field `{field.replace('_', ' ').capitalize()}`"
             )
 
     captured_raw = _expect_str(block, "captured")
     captured_match = _CAPTURED_RE.match(captured_raw)
     if not captured_match:
         raise LessonError(
-            f"lesson {lesson_id}: Captured line must match "
+            f"{prefix}: Captured line must match "
             f"'YYYY-MM-DD from feature <id>', got {captured_raw!r}"
         )
     try:
         captured = date.fromisoformat(captured_match.group(1))
     except ValueError as exc:
-        raise LessonError(f"lesson {lesson_id}: Captured date not ISO-parseable: {exc}") from exc
+        raise LessonError(f"{prefix}: Captured date not ISO-parseable: {exc}") from exc
     captured_from = captured_match.group(2)
 
     resolved_by = _expect_str(block, "resolved_by")
     if resolved_by != "manual" and not _SHA_RE.match(resolved_by):
         raise LessonError(
-            f"lesson {lesson_id}: Resolved-by must be 40-hex SHA or 'manual', got {resolved_by!r}"
+            f"{prefix}: Resolved-by must be 40-hex SHA or 'manual', got {resolved_by!r}"
         )
 
     tags_raw = _expect_str(block, "tags")
-    tags = _parse_tags(lesson_id, tags_raw)
+    tags = _parse_tags(prefix, tags_raw)
 
     severity = _expect_str(block, "severity")
     if severity not in _VALID_SEVERITIES:
-        raise LessonError(
-            f"lesson {lesson_id}: Severity {severity!r} not in {sorted(_VALID_SEVERITIES)}"
-        )
+        raise LessonError(f"{prefix}: Severity {severity!r} not in {sorted(_VALID_SEVERITIES)}")
 
     status = _expect_str(block, "status")
-    _validate_status_shape(lesson_id, status)
+    _validate_status_shape(prefix, status)
 
     trap = _expect_str(block, "trap")
     avoidance = _expect_str(block, "avoidance")
     for field_name, field_value in (("Trap", trap), ("Avoidance", avoidance)):
         if len(field_value) > _MAX_FIELD_CHARS:
             raise LessonError(
-                f"lesson {lesson_id}: {field_name} field is {len(field_value)} chars; "
+                f"{prefix}: {field_name} field is {len(field_value)} chars; "
                 f"cap is {_MAX_FIELD_CHARS}. Tighten the prose; future readers must "
                 "be able to scan the row in the dispatch budget summary."
             )
@@ -335,34 +345,43 @@ def _expect_str(block: dict[str, object], key: str) -> str:
     return value
 
 
-def _parse_tags(lesson_id: str, raw: str) -> tuple[str, ...]:
+def _parse_tags(ctx: str, raw: str) -> tuple[str, ...]:
+    """Parse the comma-separated Tags cell against the controlled vocabulary.
+
+    ``ctx`` is a free-form caller-supplied prefix prepended to every error
+    message — typically the per-block ``line N lesson L001`` string or, when
+    invoked from a non-parser caller, the raw ``lesson L001``.
+    """
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     if not tokens:
-        raise LessonError(f"lesson {lesson_id}: Tags list is empty; at least one tag required")
+        raise LessonError(f"{ctx}: Tags list is empty; at least one tag required")
     seen: list[str] = []
     for tok in tokens:
         if tok not in _TAG_VOCAB:
             raise LessonError(
-                f"lesson {lesson_id}: tag {tok!r} not in controlled vocabulary "
-                f"(allowed: {sorted(_TAG_VOCAB)})"
+                f"{ctx}: tag {tok!r} not in controlled vocabulary (allowed: {sorted(_TAG_VOCAB)})"
             )
         if tok not in seen:
             seen.append(tok)
     return tuple(seen)
 
 
-def _validate_status_shape(lesson_id: str, status: str) -> None:
+def _validate_status_shape(ctx: str, status: str) -> None:
+    """Validate that ``status`` matches the closed lesson-status vocabulary.
+
+    ``ctx`` is a caller-supplied prefix prepended to every error message.
+    """
     if status in _TERMINAL_STATUSES:
         return
     if status.startswith("superseded-by:"):
         if not _SUPERSEDED_RE.match(status):
             raise LessonError(
-                f"lesson {lesson_id}: Status superseded target must be L<NNN> "
+                f"{ctx}: Status superseded target must be L<NNN> "
                 f"(three zero-padded digits), got {status!r}"
             )
         return
     raise LessonError(
-        f"lesson {lesson_id}: Status {status!r} not in "
+        f"{ctx}: Status {status!r} not in "
         f"{sorted(_TERMINAL_STATUSES)} and not a 'superseded-by:L<NNN>' marker"
     )
 
@@ -568,7 +587,7 @@ def amend_status(
     if lesson_id not in by_id:
         raise LessonError(f"lesson {lesson_id} not present in {path}")
 
-    _validate_status_shape(lesson_id, new_status)
+    _validate_status_shape(f"lesson {lesson_id}", new_status)
 
     current = by_id[lesson_id]
     _check_transition(current.status, new_status)

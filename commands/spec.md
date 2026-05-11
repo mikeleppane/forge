@@ -32,7 +32,9 @@ no idea text to scan.
 3. For new feature: derive id, then call `tools.state.feature_folder_exists(repo_root, feature_id)`. If True, abort with a slug-suffix suggestion. Otherwise create folder, copy `templates/feature/SPEC.md`, `templates/feature/decisions.md`, and `templates/feature/state.json` into it; set `feature_id`, `tier` (default `focused` unless user passes `--standard` or `--full`), `current_phase = "spec"`.
 4. For existing feature (`--feature <id>`): read `.forge/features/<id>/state.json`, call `tools.state.start_phase(path, "spec")`. The capability scan in step 2 is skipped on this path.
 5. Invoke the `forge-spec` skill (see `skills/forge-spec/SKILL.md`).
-6. On completion, print: feature id, path to SPEC.md, next recommended step (`/forge:execute` for `--focused`).
+6. On completion, print feature id and path to SPEC.md, then branch the next-step prose on `phases.spec.status` so the user is never told to dispatch a phase that will refuse:
+   - **When `phases.spec.status == "done"`** (step 7 self-review cleared, step 8 wrote the status flip): resolve the next slash command via `tools.state.next_phase_command(payload)` and print it verbatim (e.g. `/forge:execute --feature <id>` for focused, `/forge:scenarios --feature <id>` for standard, `/forge:domain --feature <id>` for full).
+   - **When `phases.spec.status == "in_progress"`** (a validator `BLOCK`/`HIGH` finding or an inline check held the gate, or the user is still reviewing a draft): instead print `Re-run /forge:spec --feature <id> after addressing the findings above to finalize and advance.` Do NOT print the downstream phase command — the downstream commands all enforce `phases.spec.status == "done"` and would refuse.
 
 ## Failure modes
 

@@ -53,9 +53,7 @@ def _extract_state_blocks(markdown: str) -> list[tuple[int, dict[str, object]]]:
 def test_readme_state_json_examples_validate_against_schema(repo_root: Path) -> None:
     """Every state.json example block in README.md must satisfy state.schema.json."""
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
-    schema = json.loads(
-        (repo_root / "schemas" / "state.schema.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads((repo_root / "schemas" / "state.schema.json").read_text(encoding="utf-8"))
     blocks = _extract_state_blocks(readme)
 
     assert blocks, (
@@ -70,6 +68,4 @@ def test_readme_state_json_examples_validate_against_schema(repo_root: Path) -> 
         except jsonschema.ValidationError as exc:
             failures.append(f"README.md:{line} — {exc.message}")
 
-    assert not failures, "README state.json examples drifted from schema:\n" + "\n".join(
-        failures
-    )
+    assert not failures, "README state.json examples drifted from schema:\n" + "\n".join(failures)

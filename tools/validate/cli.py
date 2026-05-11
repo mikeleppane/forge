@@ -19,6 +19,7 @@ from ._config_shape import validate_config
 from ._feature_layout import PLAN_FILENAME, SPEC_FILENAME
 from ._finding import EXIT_NONZERO_SEVERITIES, Finding, _finding_to_dict
 from ._research_shape import validate_research
+from ._review_lesson_tags import validate_review_md_lesson_tags
 from .constitution import validate_constitution
 from .conventions import validate_conventions
 from .delta import validate_delta
@@ -228,12 +229,16 @@ def _validate_feature(
         if spec.is_file():
             findings.extend(validate_plan_tasks(plan, spec_path=spec))
         findings.extend(validate_verified_deps(plan, check_registries=check_registries))
-    # WS2: a feature folder with a state.json is the right scope for the
+    # A feature folder with a state.json is the right scope for the
     # git-conventions structural check. The validator self-gates on the
     # feature-folder path shape and silently passes for features with no
     # ``commits[]``, so the wiring is safe to run unconditionally.
     if (feature / "state.json").is_file():
         findings.extend(validate_git_conventions(feature))
+    # Cross-check REVIEW.code.md lesson tags against ``.forge/intel/lessons.md``
+    # at validate time so a row Severity / lesson Severity mismatch surfaces in
+    # CI instead of waiting until /forge:ship. No-op when either file is absent.
+    findings.extend(validate_review_md_lesson_tags(feature, repo_root))
     return findings
 
 

@@ -132,7 +132,7 @@ You already have an AI coding agent. FORGE adds the missing scaffolding around i
 - **QA** is a fresh-outsider black-box pass after ship — an agent with no implementation context exercises the artifact from a user's perspective, attempts edge cases, and red-teams it. Verdict gates the pre-PR prompt; advisory post-merge.
 - **TDD** is mechanical, not aspirational — every acceptance criterion requires a paired test commit before its impl commit, enforced by `tools.validate.tdd_evidence`.
 - **Context discipline** keeps the main thread under a hard token budget by isolating slices in subagents and preventing context bleed.
-- **Cross-AI review** *(roadmap, M4)* uses a different model family (Claude ↔ GPT) as a second-opinion reviewer, reinforcing the adversarial shared-understanding goal. Schema (`cross-ai-config`) has landed; UX wiring is in flight.
+- **Cross-AI review** uses a different model family (Claude ↔ GPT) as a second-opinion reviewer, reinforcing the adversarial shared-understanding goal. Manual mode (default) writes a self-contained prompt to disk for paste-into-other-CLI workflows; auto mode (opt-in) dispatches an external CLI directly. Both modes apply a configurable redaction filter before any prompt materialises. See [Cross-AI peer review](#cross-ai-peer-review) for the full surface.
 
 FORGE pays off when the cost of building the wrong thing, losing context, drifting from intent, or losing your own mental model of the code is higher than the cost of a disciplined workflow. It is **not** the fastest path to code. It *is* a clear path from intent to verified behavior — without surrendering your understanding of the system along the way.
 
@@ -358,7 +358,7 @@ clear, actionable error message that names the offending row.
     "execute": { "status": "in_progress", "started_at":   "2026-05-10T10:18:55Z" },
     "verify":  { "status": "pending" }
   },
-  "skipped":    [{ "phase": "research", "reason": "M3 deferred — manual research acceptable" }],
+  "skipped":    [{ "phase": "research", "reason": "research deferred; manual research acceptable" }],
   "deviations": [],
   "commits":    ["abc1234", "def5678"]
 }
@@ -460,7 +460,7 @@ python -m tools.validate --target health   # planning-directory health
 - Python 3.12+, ruff (lint + format), mypy `--strict`, pytest.
 - [Conventional Commits](https://www.conventionalcommits.org/) with required scopes (e.g., `feat(routing):`, `fix(archive):`, `test(state):`). Atomic commits — one logical change per commit.
 - No `Co-Authored-By: Claude` trailers in commit messages.
-- No internal phase/finding/milestone references in code, docstrings, comments, or commit messages — those belong in the PR description.
+- No internal planning labels in code, docstrings, comments, or commit messages — those belong in the PR description.
 - All planning artifacts (`SPEC.md`, `PLAN.md`, etc.) must pass `python -m tools.validate`.
 - For larger features, follow FORGE's own lifecycle (`/forge:do`).
 

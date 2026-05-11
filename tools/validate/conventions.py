@@ -141,6 +141,44 @@ def _filename_scope_findings(
     return findings
 
 
+# Severities the dispatch hook actually enforces. Mirrors
+# ``hooks/check_budget.py::_CONVENTION_DENY_SEVERITIES``; if you tighten one,
+# tighten the other.
+_DISPATCH_BRIEF_ENFORCED_SEVERITIES: Final[frozenset[str]] = frozenset({"BLOCK", "HIGH"})
+
+
+def _dispatch_brief_severity_findings(
+    rules: list[Convention],
+    path: Path,
+) -> list[Finding]:
+    """Refuse ``dispatch_brief``-scope rules whose severity the hook ignores.
+
+    The dispatch hook (``hooks/check_budget.py``) is the sole enforcement
+    surface for ``dispatch_brief``-scope rules and only denies on
+    ``BLOCK`` / ``HIGH``. A rule with ``MEDIUM`` / ``LOW`` / ``WARN`` is
+    silently dead-letter — the author expects enforcement that never fires.
+    Reject at load time so the misconfiguration is loud.
+    """
+    findings: list[Finding] = []
+    for rule in rules:
+        if "dispatch_brief" not in rule.scope:
+            continue
+        if rule.severity in _DISPATCH_BRIEF_ENFORCED_SEVERITIES:
+            continue
+        findings.append(
+            Finding(
+                "BLOCK",
+                _TARGET,
+                path,
+                f"{rule.id}: scope 'dispatch_brief' requires severity BLOCK or HIGH "
+                f"(got {rule.severity!r}); the dispatch hook is the sole enforcement "
+                "surface and ignores lower severities. Either tighten severity or "
+                "remove 'dispatch_brief' from scope.",
+            ),
+        )
+    return findings
+
+
 def load_conventions(repo_root: Path) -> list[Convention]:
     """Parse ``.forge/conventions.json`` and return the typed rule list.
 
@@ -169,7 +207,15 @@ def load_conventions(repo_root: Path) -> list[Convention]:
     schema_errors = _schema_findings(parsed, path)
     if schema_errors:
         raise ValueError("; ".join(f.message for f in schema_errors))
-    rules = load_conventions_permissive(repo_root)
+    # Build typed rules directly from the schema-validated payload rather
+    # than via :func:`load_conventions_permissive` — the permissive loader
+    # silently drops dead-letter ``dispatch_brief`` rules (fail-permissive
+    # for the hook), but the strict path needs to see every rule so it can
+    # raise on them explicitly via :func:`_dispatch_brief_severity_findings`.
+    rules = _build_rules_from_payload(parsed)
+    # Permissive loader runs the same shape checks before returning. Call it
+    # for its dup-id + structural rejections so the strict path keeps parity.
+    load_conventions_permissive(repo_root)
     # Regex compile + ReDoS-shape pre-check so callers (e.g. amend lifecycle)
     # never have to repeat the work. The permissive loader skips this so the
     # dispatch hook can still match rules with valid patterns when the file
@@ -192,6 +238,9 @@ def load_conventions(repo_root: Path) -> list[Convention]:
     scope_errors = _filename_scope_findings(rules, path)
     if scope_errors:
         raise ValueError("; ".join(f.message for f in scope_errors))
+    severity_errors = _dispatch_brief_severity_findings(rules, path)
+    if severity_errors:
+        raise ValueError("; ".join(f.message for f in severity_errors))
     return rules
 
 
@@ -384,6 +433,7 @@ def validate_conventions(
 
     findings: list[Finding] = []
     findings.extend(_filename_scope_findings(rules, path))
+    findings.extend(_dispatch_brief_severity_findings(rules, path))
     for rule in rules:
         compile_err = _check_pattern_compile(rule, path)
         if compile_err is not None:

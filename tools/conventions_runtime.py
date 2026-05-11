@@ -19,6 +19,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, cast
@@ -173,7 +174,39 @@ def load_conventions_permissive(repo_root: Path) -> list[Convention]:
         rules.append(rule)
     if duplicates:
         raise ValueError(f"duplicate id(s); ids must be globally unique: {sorted(duplicates)}")
-    return rules
+    return _drop_dead_letter_dispatch_brief_rules(rules)
+
+
+# Severities the dispatch hook enforces. Mirrors
+# ``hooks/check_budget.py::_CONVENTION_DENY_SEVERITIES`` and
+# ``tools.validate.conventions._DISPATCH_BRIEF_ENFORCED_SEVERITIES``.
+_DISPATCH_BRIEF_ENFORCED_SEVERITIES: Final[frozenset[str]] = frozenset({"BLOCK", "HIGH"})
+
+
+def _drop_dead_letter_dispatch_brief_rules(rules: list[Convention]) -> list[Convention]:
+    """Drop ``dispatch_brief``-scope rules whose severity the hook ignores.
+
+    The strict loader in :mod:`tools.validate.conventions` raises on such
+    rules at load time. The permissive runtime path (this module) is the
+    hook's entry point and must fail-permissive on shape issues so a single
+    bad rule does not silently disable enforcement of the rest. We log a
+    one-line stderr warning per skipped rule and continue.
+    """
+    kept: list[Convention] = []
+    for rule in rules:
+        if (
+            "dispatch_brief" in rule.scope
+            and rule.severity not in _DISPATCH_BRIEF_ENFORCED_SEVERITIES
+        ):
+            print(
+                f"[forge-check-budget] skipping dead-letter rule {rule.id!r}: "
+                f"scope 'dispatch_brief' with severity {rule.severity!r} is not "
+                "enforced by the dispatch hook (only BLOCK / HIGH fire)",
+                file=sys.stderr,
+            )
+            continue
+        kept.append(rule)
+    return kept
 
 
 def _compile_or_none(pattern: str) -> re.Pattern[str] | None:

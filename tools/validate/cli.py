@@ -20,8 +20,10 @@ from ._feature_layout import PLAN_FILENAME, SPEC_FILENAME
 from ._finding import EXIT_NONZERO_SEVERITIES, Finding, _finding_to_dict
 from ._research_shape import validate_research
 from .constitution import validate_constitution
+from .conventions import validate_conventions
 from .delta import validate_delta
 from .domain_glossary import validate_domain_glossary
+from .git_conventions import validate_git_conventions
 from .health import validate_health
 from .plan import validate_plan_tasks, validate_verified_deps
 from .qa_shape import validate_qa_shape
@@ -48,9 +50,9 @@ _PER_FILE_TARGETS: frozenset[str] = frozenset(
     }
 )
 _PER_FOLDER_TARGETS: frozenset[str] = frozenset(
-    {"deviations", "tdd_evidence", "domain_glossary", "qa_shape"}
+    {"deviations", "tdd_evidence", "domain_glossary", "qa_shape", "git-conventions"}
 )
-_REPO_WIDE_TARGETS: frozenset[str] = frozenset({"health", "ship", "all", "config"})
+_REPO_WIDE_TARGETS: frozenset[str] = frozenset({"health", "ship", "all", "config", "conventions"})
 
 # Reserved sub-folder names under ``.forge/features/`` and ``.forge/changes/``
 # that the ``--target all`` dispatcher must skip — they are not live artifacts.
@@ -72,6 +74,8 @@ _TARGET_CHOICES: tuple[str, ...] = (
     "research",
     "constitution",
     "config",
+    "conventions",
+    "git-conventions",
     "health",
     "ship",
     "all",
@@ -142,6 +146,13 @@ def _dispatch_qa_shape(args: argparse.Namespace, repo_root: Path) -> list[Findin
     return list(validate_qa_shape(repo_root, args.path.name))
 
 
+def _dispatch_git_conventions(
+    args: argparse.Namespace,
+    repo_root: Path,  # noqa: ARG001
+) -> list[Finding]:
+    return list(validate_git_conventions(args.path))
+
+
 def _dispatch_research(args: argparse.Namespace, repo_root: Path) -> list[Finding]:  # noqa: ARG001
     return list(validate_research(args.path))
 
@@ -156,6 +167,13 @@ def _dispatch_config(
 def _dispatch_constitution(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
     resolved = args.path if args.path is not None else repo_root / ".forge" / "CONSTITUTION.md"
     return list(validate_constitution(resolved))
+
+
+def _dispatch_conventions(
+    args: argparse.Namespace,  # noqa: ARG001
+    repo_root: Path,
+) -> list[Finding]:
+    return list(validate_conventions(repo_root))
 
 
 def _dispatch_health(
@@ -199,6 +217,12 @@ def _validate_feature(
         if spec.is_file():
             findings.extend(validate_plan_tasks(plan, spec_path=spec))
         findings.extend(validate_verified_deps(plan, check_registries=check_registries))
+    # WS2: a feature folder with a state.json is the right scope for the
+    # git-conventions structural check. The validator self-gates on the
+    # feature-folder path shape and silently passes for features with no
+    # ``commits[]``, so the wiring is safe to run unconditionally.
+    if (feature / "state.json").is_file():
+        findings.extend(validate_git_conventions(feature))
     return findings
 
 
@@ -214,6 +238,13 @@ def _dispatch_all(args: argparse.Namespace, repo_root: Path) -> list[Finding]:
     findings.extend(validate_health(repo_root))
     findings.extend(validate_capability_uniqueness(repo_root))
     findings.extend(validate_config(repo_root / ".forge" / "config.json"))
+    # WS2 shape pass: catch schema / duplicate-id / regex compile / ReDoS-shape /
+    # mis-scoped filename_glob_forbidden in ``.forge/conventions.json`` before
+    # any feature-level work runs. Pattern-firing checks (commit_body / diff)
+    # remain SKILL-driven — the review workflow gathers commit bodies and diffs
+    # per feature and calls ``validate_conventions(repo_root, commit_body=...,
+    # diff=...)`` directly.
+    findings.extend(validate_conventions(repo_root))
 
     constitution = repo_root / ".forge" / "CONSTITUTION.md"
     if constitution.is_file():
@@ -256,9 +287,11 @@ _TARGET_DISPATCH: dict[str, Callable[[argparse.Namespace, Path], list[Finding]]]
     "tdd_evidence": _dispatch_tdd_evidence,
     "domain_glossary": _dispatch_domain_glossary,
     "qa_shape": _dispatch_qa_shape,
+    "git-conventions": _dispatch_git_conventions,
     "research": _dispatch_research,
     "constitution": _dispatch_constitution,
     "config": _dispatch_config,
+    "conventions": _dispatch_conventions,
     "health": _dispatch_health,
     "ship": _dispatch_ship,
     "all": _dispatch_all,

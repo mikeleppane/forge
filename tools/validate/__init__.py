@@ -20,8 +20,10 @@ from ._finding import (
 from ._research_shape import validate_research
 from .cli import main
 from .constitution import validate_constitution
+from .conventions import validate_conventions
 from .delta import validate_delta
 from .domain_glossary import validate_domain_glossary
+from .git_conventions import GitConventionsConfig, validate_git_conventions
 from .health import validate_health
 from .plan import validate_plan_tasks, validate_verified_deps
 from .qa_shape import validate_qa_shape
@@ -39,6 +41,7 @@ __all__ = [
     "EXIT_NONZERO_SEVERITIES",
     "MAX_FIX_HINT_LEN",
     "Finding",
+    "GitConventionsConfig",
     "Severity",
     "ValidationError",
     "main",
@@ -47,10 +50,12 @@ __all__ = [
     "validate_capability_uniqueness",
     "validate_config",
     "validate_constitution",
+    "validate_conventions",
     "validate_delta",
     "validate_deviations",
     "validate_domain_glossary",
     "validate_frontmatter",
+    "validate_git_conventions",
     "validate_health",
     "validate_negative_requirements",
     "validate_plan_tasks",

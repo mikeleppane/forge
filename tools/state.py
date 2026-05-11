@@ -436,6 +436,7 @@ def record_routing_decision(
     proposed_tier: str | None = None,
     rationale: str | None = None,
     constitution_present: bool = False,
+    phase_list: list[str] | None = None,
     schema_path: Path | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:
@@ -448,6 +449,11 @@ def record_routing_decision(
         proposed_tier: Tier the router proposed before user override.
         rationale: One-sentence reason from the router or user.
         constitution_present: True when .forge/CONSTITUTION.md was loaded at routing time.
+        phase_list: Optional ordered list of unique lifecycle phase names. When
+            given, persisted into ``routing.phase_list`` and consumed by
+            ``next_phase_command`` for sequencing. When ``None`` (default), the
+            field is omitted and consumers fall back to the per-tier static
+            table via ``get_phase_list``'s lazy-derive branch.
         schema_path: Optional schema for read+write validation.
         now: Optional ISO 8601 timestamp; defaults to UTC now.
 
@@ -462,7 +468,7 @@ def record_routing_decision(
     if proposed_tier is not None and proposed_tier not in VALID_TIERS:
         raise StateError(f"invalid proposed_tier {proposed_tier!r}; must be one of {VALID_TIERS}")
     payload = read_state(path, schema_path=schema_path)
-    # M3 cross-check: final_tier must match the seeded state.json.tier so a
+    # Cross-check: final_tier must match the seeded state.json.tier so a
     # focused/standard feature cannot quietly end up with routing.final_tier
     # set to "full" (which would corrupt downstream phase-pump tables and
     # next_phase_command resolution). seed_routed_feature already passes
@@ -481,6 +487,10 @@ def record_routing_decision(
         block["proposed_tier"] = proposed_tier
     if rationale is not None:
         block["rationale"] = rationale
+    if phase_list is not None:
+        # Defensive copy so caller mutations after the call do not leak into
+        # the persisted block. Schema enforces uniqueItems + enum membership.
+        block["phase_list"] = list(phase_list)
     payload["routing"] = block
     write_state(path, payload, schema_path=schema_path)
     return payload

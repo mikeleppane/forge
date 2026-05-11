@@ -1122,6 +1122,33 @@ def _next_from_phase_list(  # noqa: PLR0911
     return f"/forge:{next_phase}"
 
 
+def current_phase_command(state_payload: dict[str, Any]) -> str | None:
+    """Return the slash-command for ``state_payload['current_phase']``, or None.
+
+    Read-only. Pure function over a state.json payload. Returns the slash
+    literal that runs the phase the feature is **currently in** — i.e., the
+    command a user should invoke next when ``start_phase`` has already moved
+    ``current_phase`` to a freshly-opened phase.
+
+    This is the complement of :func:`next_phase_command`, which returns the
+    slash for the phase **after** ``current_phase``. Use this helper after a
+    ``complete_phase(prev) + start_phase(next)`` pair, when the prose needs to
+    point the operator at the phase the lifecycle just transitioned **into**.
+    Calling ``next_phase_command`` in that spot returns the phase after that,
+    so the operator would be told to skip the just-opened phase.
+    """
+    phase = state_payload.get("current_phase")
+    if not isinstance(phase, str):
+        return None
+    if phase == "done" or phase not in VALID_LIFECYCLE_PHASES:
+        return None
+    if phase == "review":
+        return _next_review_command(state_payload)
+    if phase == "qa":
+        return "/forge:qa --against merged"
+    return f"/forge:{phase}"
+
+
 def next_phase_command(state_payload: dict[str, Any]) -> str | None:
     """Return the slash-command for the next pipeline phase, or None when done.
 

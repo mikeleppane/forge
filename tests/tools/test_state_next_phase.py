@@ -106,3 +106,66 @@ def test_next_phase_unknown_tier_returns_none() -> None:
     payload = _state("focused", "spec")
     payload["tier"] = "exotic"
     assert state.next_phase_command(payload) is None
+
+
+# ---------------------------------------------------------------------------
+# current_phase_command — slash literal for the phase the feature is in NOW
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "phase,expected",
+    [
+        ("refine", "/forge:refine"),
+        ("research", "/forge:research"),
+        ("spec", "/forge:spec"),
+        ("domain", "/forge:domain"),
+        ("scenarios", "/forge:scenarios"),
+        ("plan", "/forge:plan"),
+        ("crucible", "/forge:crucible"),
+        ("execute", "/forge:execute"),
+        ("verify", "/forge:verify"),
+        ("ship", "/forge:ship"),
+    ],
+)
+def test_current_phase_command_returns_slash_for_current_phase(phase: str, expected: str) -> None:
+    """After ``start_phase(P)``, ``current_phase`` equals P; the helper
+    returns the slash that runs P — not the slash for the phase after P.
+
+    Regression guard: ``commands/spec.md`` used to print
+    ``next_phase_command(payload)`` here, which returned the phase *after*
+    the just-opened phase and told users to skip ahead.
+    """
+    assert state.current_phase_command(_state("full", phase)) == expected
+
+
+def test_current_phase_command_qa_carries_against_merged_flag() -> None:
+    assert state.current_phase_command(_state("full", "qa")) == "/forge:qa --against merged"
+
+
+def test_current_phase_command_review_delegates_to_review_resolver() -> None:
+    payload = _state("standard", "review", targets_done=[], current_target="plan")
+    assert state.current_phase_command(payload) == "/forge:review --target plan"
+
+    payload_after_plan = _state("standard", "review", targets_done=["plan"], current_target="plan")
+    # After plan-review closes, the lifecycle leaves review for execute; the
+    # resolver mirrors that ping-pong.
+    assert state.current_phase_command(payload_after_plan) == "/forge:execute"
+
+
+def test_current_phase_command_returns_none_for_done_state() -> None:
+    payload = _state("focused", "verify")
+    payload["current_phase"] = "done"
+    assert state.current_phase_command(payload) is None
+
+
+def test_current_phase_command_returns_none_for_non_string_phase() -> None:
+    payload = _state("focused", "spec")
+    payload["current_phase"] = 42
+    assert state.current_phase_command(payload) is None
+
+
+def test_current_phase_command_returns_none_for_unknown_phase() -> None:
+    payload = _state("focused", "spec")
+    payload["current_phase"] = "fictional-phase"
+    assert state.current_phase_command(payload) is None

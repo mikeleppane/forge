@@ -10,8 +10,12 @@ in_progress. Two surfaces ship that prose:
 Both surfaces must:
 
 1. Branch on phases.spec.status. The in-progress branch tells the user
-   to re-run /forge:spec; the done branch surfaces the next phase via
-   tools.state.next_phase_command.
+   to re-run /forge:spec; the done branch surfaces the just-opened
+   phase via tools.state.current_phase_command. Calling
+   next_phase_command on the done branch is incorrect — by that point
+   start_phase already advanced current_phase, so next_phase_command
+   returns the phase *after* the just-opened one and would tell the
+   user to skip ahead.
 2. Never instruct the user to run /forge:execute (or any other
    downstream phase command) from a state where spec.status is still
    in_progress.
@@ -36,9 +40,10 @@ def test_command_spec_branches_next_step_on_phase_status(repo_root: Path) -> Non
         "commands/spec.md must instruct the user to re-run /forge:spec when "
         "spec.status is still in_progress"
     )
-    assert "next_phase_command" in body, (
+    assert "tools.state.current_phase_command(payload)" in body, (
         "commands/spec.md must resolve the done-branch next step via "
-        "tools.state.next_phase_command rather than hard-coding /forge:execute"
+        "tools.state.current_phase_command(payload). next_phase_command is the "
+        "wrong helper here because start_phase already advanced current_phase."
     )
 
 

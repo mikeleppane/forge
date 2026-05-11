@@ -613,8 +613,20 @@ def test_unknown_sha_skips_further_checks(tmp_path: Path) -> None:
 # --- Trailer parsing edge cases ----------------------------------------------
 
 
-def test_keyvalue_in_body_not_parsed_as_trailer(tmp_path: Path) -> None:
-    """Only the trailing contiguous Key: value block counts as trailers."""
+def test_trailer_shaped_line_anywhere_in_message_is_flagged(tmp_path: Path) -> None:
+    """Trailer-shape lines fire ban patterns even outside the trailing block.
+
+    The earlier contract restricted ban matching to the parsed trailer
+    block, which let a malformed tail (one non-trailer line dropped after
+    a banned trailer) hide the banned line from the check entirely. The
+    fallback line-scan in :func:`_check_trailers` closes that bypass: any
+    ``Key: value`` line carrying banned text is flagged regardless of its
+    position in the message. The companion test
+    :func:`test_banned_pattern_in_body_only_not_flagged` still pins the
+    "prose containing colon-text is not a trailer" rule (because that
+    prose is not trailer-shaped — it has narrative context around the
+    colon).
+    """
     folder = _feature_layout(tmp_path)
     _write_config(
         tmp_path,
@@ -633,9 +645,9 @@ def test_keyvalue_in_body_not_parsed_as_trailer(tmp_path: Path) -> None:
     _write_state(folder, [{"sha": sha, "phase": "spec", "subject": subject}])
     scripts = _script_commit(sha, body)
     findings = validate_git_conventions(folder, runner=_ScriptedRunner(scripts))
-    # The "Forbidden:" line is in the body block, not the trailing trailer block,
-    # so it must NOT match the trailer ban.
-    assert all(f.severity != "BLOCK" for f in findings), findings
+    blockers = [f for f in findings if f.severity == "BLOCK"]
+    assert len(blockers) == 1, findings
+    assert "Forbidden: this is in the body" in blockers[0].message
 
 
 def test_only_subject_no_body_no_trailers(tmp_path: Path) -> None:

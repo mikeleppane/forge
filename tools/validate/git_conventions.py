@@ -14,8 +14,17 @@ the configured contract:
   permissive "missing scope ⇒ ok" rule. Set
   ``git_conventions.subject.require_scope: false`` to opt back into the
   Conventional Commits relaxed behavior.
-* No trailer line in the message matches any configured ``ban_patterns``
-  (compared with :func:`re.fullmatch`).
+* No trailer line in the message matches any configured ``ban_patterns``.
+  Matching runs in two passes: a strict pass over the parsed trailer block
+  (``re.fullmatch``) and a fallback pass over every message line
+  (``re.search``) that catches banned trailers smuggled past the strict
+  parser by a malformed trailer-block (one stray non-trailer-shaped line
+  used to hide the entire tail from the ban check). Findings are deduped
+  by ``(pattern, line)`` so a well-formed banned trailer surfaces exactly
+  one finding. Patterns compile with :data:`re.IGNORECASE` so authoring
+  conventions like ``Co-Authored-By: Claude.*`` also fire on
+  ``co-authored-by: claude ...`` — trailer header names are
+  case-insensitive per RFC 5322.
 
 Subprocess errors (missing SHA, no ``git`` binary on PATH, timeout) downgrade
 to a ``WARN`` ``unknown-sha:<sha>`` finding and never raise. Config defaults
@@ -105,8 +114,13 @@ class GitConventionsConfig:
         allowed_scopes: Permitted scope tokens. Empty tuple disables the
             scope-allowlist check entirely. A commit with no scope is
             governed by ``require_scope`` regardless of this list.
-        trailer_ban_patterns: Regex patterns matched against each trailer
-            line via :func:`re.fullmatch`. A hit emits a ``BLOCK`` finding.
+        trailer_ban_patterns: Regex patterns matched against trailer-shape
+            lines in the commit message. The parsed trailer block is matched
+            with :func:`re.fullmatch`; every other trailer-shaped line is
+            scanned with :func:`re.search` as a malformed-block fallback.
+            Compiled with :data:`re.IGNORECASE` (RFC 5322 trailer header
+            names are case-insensitive). A hit emits a ``BLOCK`` finding;
+            duplicates across the two passes are deduped.
     """
 
     subject_max_length: int
@@ -237,19 +251,26 @@ def load_config(repo_root: Path) -> GitConventionsConfig:
 
 
 def _compile_bans(patterns: tuple[str, ...], state_path: Path) -> _CompiledBans:
-    """Compile every ban pattern ONCE.
+    """Compile every ban pattern ONCE with :data:`re.IGNORECASE`.
 
     Returns the successful compilations plus one :class:`Finding` per
     pattern that fails to compile. A previous version compiled inside the
     per-commit loop, so a single broken pattern emitted one identical
     BLOCK finding per commit — extremely noisy and confusing about the
     actual error attribution.
+
+    Compilation uses :data:`re.IGNORECASE` so author-written patterns such
+    as ``"Co-Authored-By: Claude.*"`` fire on ``co-authored-by: claude``
+    too. RFC 5322 trailer header names are case-insensitive, and FORGE
+    history has shown the case-sensitive default to be a silent bypass.
+    Authors can still tighten with inline ``(?-i:...)`` if a specific
+    pattern needs case-sensitive matching.
     """
     compiled: list[re.Pattern[str]] = []
     errors: list[Finding] = []
     for pattern in patterns:
         try:
-            compiled.append(re.compile(pattern))
+            compiled.append(re.compile(pattern, re.IGNORECASE))
         except re.error as exc:
             errors.append(
                 Finding(
@@ -366,32 +387,76 @@ def _check_subject(
     return findings
 
 
+def _excerpt(line: str) -> str:
+    return line if len(line) <= _TRAILER_EXCERPT_MAX else line[:_TRAILER_EXCERPT_MAX]
+
+
+def _ban_finding(
+    *,
+    sha: str,
+    pattern: re.Pattern[str],
+    line: str,
+    state_path: Path,
+) -> Finding:
+    return Finding(
+        "BLOCK",
+        _TARGET,
+        state_path,
+        (f"{_short(sha)}: forbidden trailer matched pattern {pattern.pattern!r}: {_excerpt(line)}"),
+    )
+
+
 def _check_trailers(
     *,
     sha: str,
+    message: str,
     trailers: list[str],
     compiled_bans: _CompiledBans,
     state_path: Path,
 ) -> list[Finding]:
+    """Flag forbidden trailers via a strict pass plus a fallback line scan.
+
+    The strict pass walks the parsed trailer block from :func:`_split_message`
+    and applies each compiled ban via :meth:`re.Pattern.fullmatch` — the
+    canonical RFC-5322 trailer shape.
+
+    The fallback pass scans every trailer-shaped line in the full message
+    (matching :data:`_TRAILER_LINE`) with :meth:`re.Pattern.search`. This
+    closes the silent bypass where a malformed tail (one non-trailer line
+    after a banned trailer line) made :func:`_split_message` return an
+    empty trailer list, hiding the banned line from the strict pass. The
+    fallback uses ``search`` because a smuggled line may carry surrounding
+    whitespace or garbage that ``fullmatch`` would refuse.
+
+    Findings are deduped by ``(pattern, line)`` so a well-formed banned
+    trailer surfaces exactly ONE finding even though both passes detect it.
+    """
     findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+
     for compiled in compiled_bans.compiled:
         for trailer in trailers:
             if compiled.fullmatch(trailer):
-                excerpt = (
-                    trailer
-                    if len(trailer) <= _TRAILER_EXCERPT_MAX
-                    else trailer[:_TRAILER_EXCERPT_MAX]
-                )
+                key = (compiled.pattern, trailer)
+                if key in seen:
+                    continue
+                seen.add(key)
                 findings.append(
-                    Finding(
-                        "BLOCK",
-                        _TARGET,
-                        state_path,
-                        (
-                            f"{_short(sha)}: forbidden trailer matched pattern "
-                            f"{compiled.pattern!r}: {excerpt}"
-                        ),
-                    ),
+                    _ban_finding(sha=sha, pattern=compiled, line=trailer, state_path=state_path),
+                )
+
+    normalised = message.replace("\r\n", "\n").replace("\r", "\n")
+    for line in normalised.split("\n"):
+        if not _TRAILER_LINE.match(line):
+            continue
+        for compiled in compiled_bans.compiled:
+            if compiled.search(line):
+                key = (compiled.pattern, line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                findings.append(
+                    _ban_finding(sha=sha, pattern=compiled, line=line, state_path=state_path),
                 )
     return findings
 
@@ -459,6 +524,7 @@ def _check_commit(
     findings.extend(
         _check_trailers(
             sha=sha,
+            message=message,
             trailers=trailers,
             compiled_bans=compiled_bans,
             state_path=state_path,

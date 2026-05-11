@@ -39,6 +39,7 @@ documents, so any wording drift here breaks the parse downstream.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -93,13 +94,18 @@ class Prompt:
     redaction). ``files_referenced`` is the union of every file path the
     body discusses — the redactor uses it to widen its overlay so the
     same paths get scrubbed even if they happen to slip the body's
-    pattern set.
+    pattern set. ``diff_loc`` is the insertion+deletion line count for
+    ``target=code`` (sourced from ``git diff --shortstat``); it is
+    always ``0`` for ``target=plan`` and is forwarded verbatim to the
+    disclosure summary so the operator sees the change size before
+    sending the prompt to the external reviewer.
     """
 
     target: PromptTarget
     feature_id: str
     body: str
     files_referenced: tuple[PurePosixPath, ...] = field(default_factory=tuple)
+    diff_loc: int = 0
 
 
 # --- internal helpers ------------------------------------------------------
@@ -278,29 +284,50 @@ def _git_changed_files(repo_root: Path, range_spec: str) -> tuple[str, ...]:
     return tuple(line for line in result.stdout.splitlines() if line)
 
 
+_SHORTSTAT_RE = re.compile(r"(\d+)\s+(insertion|deletion)s?\(\+?-?\)")
+
+
+def _diff_loc_from_shortstat(shortstat_output: str) -> int:
+    """Sum insertion + deletion counts from ``git diff --shortstat`` output.
+
+    ``git diff --shortstat`` emits a single line such as
+    ``" 3 files changed, 42 insertions(+), 7 deletions(-)"``. Only the
+    insertion/deletion numbers are summed; the file count is reported
+    separately in the disclosure (via ``Disclosure.file_list`` length).
+    Returns ``0`` when the output is empty (no changes) or when neither
+    counter matches — a defensive fallback so a future git format
+    tweak does not raise ``ValueError`` mid-prompt-build.
+    """
+    total = 0
+    for match in _SHORTSTAT_RE.finditer(shortstat_output):
+        total += int(match.group(1))
+    return total
+
+
 def _build_code_diff_block(
     repo_root: Path,
     state_payload: dict[str, Any],
-) -> tuple[str, tuple[PurePosixPath, ...]]:
-    """Build the ``## Diff`` Markdown block + the changed-file inventory.
+) -> tuple[str, tuple[PurePosixPath, ...], int]:
+    """Build the ``## Diff`` Markdown block, file inventory, and LOC count.
 
     Failure modes per plan step 4 + §P1.4 failure-modes block:
 
     * Empty ``state.commits[]`` (no spec-creation SHA resolvable) →
       ``_diff unavailable: no commits recorded_`` annotation; empty
-      file inventory. Not fatal — reviewer still sees SPEC excerpts.
+      file inventory; ``diff_loc=0``. Not fatal — reviewer still sees
+      SPEC excerpts.
     * ``git diff --stat`` raises ``CalledProcessError`` → ``_diff
       unavailable_`` annotation; file inventory is whatever
-      ``--name-only`` produced (possibly empty if the same SHA is
-      unresolvable in both invocations).
+      ``--name-only`` produced; ``diff_loc=0``.
 
-    Returning the inventory alongside the rendered block makes the
-    redaction overlay (``Prompt.files_referenced``) consistent with the
+    Returning the inventory and the LOC count alongside the rendered
+    block keeps the redaction overlay (``Prompt.files_referenced``)
+    and the disclosure summary's ``Diff LOC`` row consistent with the
     diff the reviewer is asked to comment on.
     """
     base_sha = _spec_creation_sha(state_payload)
     if base_sha is None:
-        return "## Diff\n\n_diff unavailable: no commits recorded_\n", ()
+        return "## Diff\n\n_diff unavailable: no commits recorded_\n", (), 0
 
     range_spec = f"{base_sha}..HEAD"
     changed_files = _git_changed_files(repo_root, range_spec)
@@ -315,11 +342,23 @@ def _build_code_diff_block(
             check=True,
         )
     except subprocess.CalledProcessError:
-        return "## Diff\n\n_diff unavailable_\n", files_referenced
+        return "## Diff\n\n_diff unavailable_\n", files_referenced, 0
+
+    try:
+        shortstat_result = subprocess.run(
+            ["git", "diff", "--shortstat", range_spec],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        diff_loc = _diff_loc_from_shortstat(shortstat_result.stdout)
+    except subprocess.CalledProcessError:
+        diff_loc = 0
 
     chunks: list[str] = ["## Diff", "", "```", stat_result.stdout.rstrip(), "```", ""]
     chunks.extend(_render_per_file_diffs(repo_root, range_spec, list(changed_files)))
-    return "\n".join(chunks), files_referenced
+    return "\n".join(chunks), files_referenced, diff_loc
 
 
 def _render_per_file_diffs(
@@ -414,6 +453,7 @@ def build_prompt(
             chunks.extend(["# Pre-Mortem", "", pre_mortem, ""])
 
     files_referenced: tuple[PurePosixPath, ...]
+    diff_loc = 0
 
     if target is PromptTarget.plan:
         plan_text = _read_required(feature_root / "PLAN.md", "PLAN.md", feature_id)
@@ -424,7 +464,7 @@ def build_prompt(
         # changed-file inventory from git itself (state schema does not
         # record per-commit files; see ``_git_changed_files``).
         state_payload = read_state(feature_root / "state.json")
-        diff_block, files_referenced = _build_code_diff_block(repo_root, state_payload)
+        diff_block, files_referenced, diff_loc = _build_code_diff_block(repo_root, state_payload)
         chunks.append(diff_block)
 
     # Constitution articles (P3 helper). The filter reads
@@ -447,6 +487,7 @@ def build_prompt(
         feature_id=feature_id,
         body=body,
         files_referenced=files_referenced,
+        diff_loc=diff_loc,
     )
 
 

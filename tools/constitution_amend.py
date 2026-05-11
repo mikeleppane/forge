@@ -16,8 +16,9 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from tools import redaction
 from tools.constitution import (
     ConstitutionError,
     _bare_dep_name,
@@ -34,6 +35,174 @@ class AmendError(RuntimeError):
 
 
 _LEVEL_RANK = {"CRITICAL": 3, "SHOULD": 2, "MAY": 1}
+
+
+# Signal collection bounds. Underscore-prefixed because they are tuning knobs
+# for one function rather than part of the module's public dispatch contract.
+_PER_FILE_CAP_BYTES = 16384
+_TOTAL_CAP_BYTES = 81920
+_MAX_SIGNAL_FILES = 8
+_TRUNCATION_MARKER = "\n--- truncated at 16384 bytes ---\n"
+_DENY_GLOBS: tuple[str, ...] = (".env*", "*.pem", "*.key", "id_rsa*")
+_MANIFEST_NAMES: tuple[str, ...] = (
+    "pyproject.toml",
+    "package.json",
+    "Cargo.toml",
+    "go.mod",
+    "Gemfile",
+    "pom.xml",
+    "build.gradle",
+    "mix.exs",
+    "composer.json",
+)
+_DOC_NAMES: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md", "README.md")
+
+# Content-level secret regex: triggered when a key-shaped label sits next to a
+# value-shaped token long enough to look like a credential. Used as a fallback
+# alongside ``tools.redaction.filter`` so unconfigured deny_regex still catches
+# obvious leaks in bootstrap signals.
+_SECRET_CONTENT_RE = re.compile(
+    r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['\"]?[A-Za-z0-9+/=_-]{12,}",
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class SignalFile:
+    """One collected signal file: repo-relative POSIX path + bounded contents."""
+
+    relative_path: PurePosixPath
+    body: str
+    truncated: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class BootstrapSignals:
+    """Pure-data result of :func:`collect_bootstrap_signals`."""
+
+    files: list[SignalFile]
+    dropped_for_secrets: list[PurePosixPath]
+    truncated: list[PurePosixPath]
+    total_bytes: int
+
+
+def _name_matches_deny_glob(name: str) -> bool:
+    """True iff ``name`` matches any path-level deny glob."""
+    return any(redaction._globstar_match(name, g) for g in _DENY_GLOBS)
+
+
+def _candidate_paths(repo_root: Path) -> list[Path]:
+    """Return existing candidate file paths in priority order, first-match per name."""
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for name in _MANIFEST_NAMES:
+        path = repo_root / name
+        if path.is_file() and path not in seen:
+            candidates.append(path)
+            seen.add(path)
+    # ``*.csproj`` is glob-matched (non-recursive, repo root only); first sorted name.
+    csproj_hits = sorted(repo_root.glob("*.csproj"))
+    for path in csproj_hits:
+        if path.is_file() and path not in seen:
+            candidates.append(path)
+            seen.add(path)
+            break  # only the first sorted match
+    for name in _DOC_NAMES:
+        path = repo_root / name
+        if path.is_file() and path not in seen:
+            candidates.append(path)
+            seen.add(path)
+    return candidates
+
+
+def _read_and_truncate(path: Path) -> tuple[str, bool]:
+    """Read ``path`` raw bytes, truncate to per-file cap, decode UTF-8.
+
+    Returns ``(body, truncated)``. ``body`` ends with the truncation marker
+    when the source exceeded the cap.
+    """
+    raw = path.read_bytes()
+    if len(raw) > _PER_FILE_CAP_BYTES:
+        head = raw[:_PER_FILE_CAP_BYTES]
+        return head.decode("utf-8", errors="replace") + _TRUNCATION_MARKER, True
+    return raw.decode("utf-8", errors="replace"), False
+
+
+def _looks_like_secret(body: str) -> bool:
+    """Run body through ``tools.redaction.filter`` then a focused regex fallback.
+
+    ``redaction.filter`` honors any caller-configured ``deny_regex`` /
+    ``fatal_regex``; the default config carries empty regex lists, so the
+    fallback below is what fires when no project config has been threaded in.
+    """
+    result = redaction.filter(
+        redaction.PromptPayload(text=body, files=()),
+        redaction.RedactionConfig(),
+    )
+    if result.had_denials or result.fatal_matches:
+        return True
+    return bool(_SECRET_CONTENT_RE.search(body))
+
+
+def collect_bootstrap_signals(repo_root: Path) -> BootstrapSignals:
+    """Collect bounded project-shape signals for skill-driven Constitution drafting.
+
+    Walks a fixed priority list of manifest and documentation files at the
+    repo root, reads each up to ``_PER_FILE_CAP_BYTES``, and stops once the
+    payload reaches ``_MAX_SIGNAL_FILES`` files or ``_TOTAL_CAP_BYTES`` bytes.
+    Files matching a path-level deny glob are skipped before reading; files
+    whose decoded body contains secret-shaped content (per ``tools.redaction``
+    or a focused fallback regex) are dropped after read and recorded in
+    ``dropped_for_secrets``. The function performs no LLM calls and no
+    network access.
+
+    Args:
+        repo_root: Absolute path to the repository root.
+
+    Returns:
+        A frozen :class:`BootstrapSignals` whose ``files`` list is in
+        priority order. Two invocations on the same tree return equal results.
+
+    Raises:
+        AmendError: If ``repo_root`` does not exist or is not a directory.
+    """
+    if not repo_root.is_dir():
+        raise AmendError(f"repo_root not found or not a directory: {repo_root}")
+
+    files: list[SignalFile] = []
+    dropped: list[PurePosixPath] = []
+    truncated_paths: list[PurePosixPath] = []
+    total_bytes = 0
+
+    for path in _candidate_paths(repo_root):
+        if len(files) >= _MAX_SIGNAL_FILES:
+            break
+        rel = PurePosixPath(path.relative_to(repo_root).as_posix())
+
+        if _name_matches_deny_glob(rel.name):
+            dropped.append(rel)
+            continue
+
+        body, was_truncated = _read_and_truncate(path)
+
+        if _looks_like_secret(body):
+            dropped.append(rel)
+            continue
+
+        body_bytes = len(body.encode("utf-8"))
+        if total_bytes + body_bytes > _TOTAL_CAP_BYTES:
+            break
+
+        files.append(SignalFile(relative_path=rel, body=body, truncated=was_truncated))
+        if was_truncated:
+            truncated_paths.append(rel)
+        total_bytes += body_bytes
+
+    return BootstrapSignals(
+        files=files,
+        dropped_for_secrets=dropped,
+        truncated=truncated_paths,
+        total_bytes=total_bytes,
+    )
 
 
 def classify_change(before: str, after: str) -> str:

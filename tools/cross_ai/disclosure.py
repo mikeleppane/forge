@@ -5,13 +5,14 @@ the chosen reviewer ``CLI``, and the resolved ``CrossAiConfig``, produce a
 frozen ``Disclosure`` snapshot the dispatcher can render to the operator
 *before* any external CLI is invoked.
 
-Two consumers in later slices read this surface:
+Two consumers read this surface:
 
-* P2 (render) prints the file list, exclusions, token + cost estimate,
+* The renderer prints the file list, exclusions, token + cost estimate,
   and the literal command preview so the operator sees exactly what is
   about to leave the machine.
-* P3 (cost-warn evaluate) reads ``cost_warn_triggered`` and ``had_redactions``
-  to decide whether to gate dispatch behind the ``APPROVE-COST`` literal.
+* The cost-warn gate reads ``cost_warn_triggered`` and ``had_redactions``
+  to decide whether to require the ``APPROVE-COST`` literal before
+  dispatch.
 
 Sourcing rules
 --------------
@@ -21,24 +22,25 @@ Sourcing rules
   two collections are independent.
 * ``excluded_files`` is the redaction layer's authoritative list of paths
   dropped by ``deny_globs`` / ``gitignore_patterns`` after ``allow_globs``
-  rescue (P0 spec §5.3.11). Disclosure forwards it untouched.
+  rescue (spec §5.3.11 RedactionResult shape). Disclosure forwards it
+  untouched.
 * ``prompt_tokens`` / ``prompt_cost_usd`` are computed against
   ``redaction_result.output_text`` — the post-scrub text that will
   actually ship — not the raw ``prompt.body``. Otherwise a redacted
   secret's original characters would inflate the estimate.
 * ``cost_warn_triggered`` is a strict ``>`` against the configured
   threshold so a prompt sitting *exactly* at the threshold does not
-  trigger the warn path. Matches the plan §P1.5 contract verbatim.
+  trigger the warn path.
 * ``command_preview`` is a literal string template; this module never
-  spawns a subprocess. The dispatcher (P3) constructs the real argv at
-  invocation time.
+  spawns a subprocess. The auto-mode dispatcher constructs the real
+  argv at invocation time.
 
 Purity
 ------
 ``build_disclosure`` is sync and pure: same inputs always produce an
 equal ``Disclosure``. No filesystem access, no subprocess, no clock.
-That guarantee is what lets P2 render a stable preview the operator can
-trust to match what P3 will dispatch.
+That guarantee is what lets the renderer surface a stable preview the
+operator can trust to match what the dispatcher will send.
 """
 
 from __future__ import annotations
@@ -70,8 +72,8 @@ class Disclosure:
             redaction excluded nothing.
         diff_loc: Optional pre-computed diff line count for ``code``
             target prompts; defaults to 0 because the plan-target branch
-            has no diff. Provided by the caller (P2 may compute it
-            once); disclosure stores rather than recomputes.
+            has no diff. Provided by the caller (the renderer may compute
+            it once); disclosure stores rather than recomputes.
         command_preview: Literal string the renderer prints — never a
             real argv. Shape: ``"<cli> <self-contained-prompt>"``.
         prompt_tokens: ``ceil(len(redacted_text) / 4)`` per
@@ -81,10 +83,12 @@ class Disclosure:
         had_redactions: Mirrors ``redaction_result.had_denials`` —
             whether any file was excluded or any inline span was scrubbed.
             Fatal regex hits are surfaced separately on the redaction
-            result and do NOT flip this flag (see P0 spec §5.3.11).
+            result and do NOT flip this flag (see spec §5.3.11
+            RedactionResult shape).
         cost_warn_triggered: ``prompt_cost_usd > config.cost_warn_threshold_usd``
             (strict greater-than). The dispatcher uses this to decide
-            whether to require the ``APPROVE-COST`` literal in P3.
+            whether to require the ``APPROVE-COST`` literal before the
+            external CLI is invoked.
     """
 
     target: PromptTarget
@@ -133,11 +137,12 @@ def build_disclosure(
     prompt_tokens = cost.estimate_tokens(redaction_result.output_text)
     prompt_cost_usd = cost.estimate_usd(cli.value, prompt_tokens)
 
-    # Strict greater-than per plan §P1.5 step 3: a prompt sitting
-    # exactly at the threshold does not trigger the warn path.
+    # Strict greater-than: a prompt sitting exactly at the threshold
+    # does not trigger the warn path.
     cost_warn_triggered = prompt_cost_usd > config.cost_warn_threshold_usd
 
-    # Literal template — P3 builds the real argv at dispatch time.
+    # Literal template — the auto-mode dispatcher builds the real argv
+    # at dispatch time.
     command_preview = f"{cli.value} <self-contained-prompt>"
 
     return Disclosure(

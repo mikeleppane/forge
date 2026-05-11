@@ -20,11 +20,12 @@ two patterns overlap (a later match's tail can survive an earlier match's
 replacement because the slice references the new, shorter ``output_text``).
 
 ReDoS notice: ``deny_regex`` and ``fatal_regex`` are user-supplied via
-``cross_ai.redaction.*`` in ``.forge/config.json`` (loaded in P1).
-This module compiles them as-is. P1 owns the bootstrap path and the
+``cross_ai.redaction.*`` in ``.forge/config.json``. This module compiles
+them as-is. The config loader owns the bootstrap path and the
 responsibility to bound user-supplied regex pathologies (e.g., reject
-patterns longer than 256 chars at config-load time). P0 ships ``filter``
-unbounded; ``deny_regex`` defaults to empty so P0 has no exposure.
+patterns longer than 256 chars at config-load time). The base ``filter``
+implementation ships unbounded; ``deny_regex`` defaults to empty so the
+default-config path has no exposure.
 """
 
 from __future__ import annotations

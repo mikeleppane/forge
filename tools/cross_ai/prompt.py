@@ -12,28 +12,28 @@ external reviewer CLI. Two branches:
   feature owner is about to ship.
 
 Pre-redaction: this module deliberately performs **no** secret
-filtering. The dispatcher (P2/P3) calls
-``tools.redaction.filter()`` over the returned ``Prompt.body`` plus the
-``files_referenced`` list before any external dispatch. Splitting the
-two phases lets the redactor reason about a single Markdown blob with a
-known shape rather than racing the builder.
+filtering. The dispatcher calls ``tools.redaction.filter()`` over the
+returned ``Prompt.body`` plus the ``files_referenced`` list before any
+external dispatch. Splitting the two stages lets the redactor reason
+about a single Markdown blob with a known shape rather than racing the
+builder.
 
 Section names — tolerant prefix match. Real FORGE SPEC.md files use
 ``## Acceptance Criteria`` / ``## Negative Requirements``; UNDERSTANDING
-files use ``# Pre-Mortem (Top Failure Modes)``. The plan §P1.4 contract
-quotes the canonical short forms (``# Acceptance``, ``# Negative
+files use ``# Pre-Mortem (Top Failure Modes)``. The reviewer-prompt
+contract quotes the canonical short forms (``# Acceptance``, ``# Negative
 Requirements``, ``# Intent``, ``# Pre-Mortem``); the extractor matches
 any header line whose stripped ``#`` prefix begins with those tokens so
 both spellings flow through without per-feature fixups.
 
 Constitution injection — calls ``tools.constitution.load_and_filter``
-with the spec ``Intent`` (truncated to ≤200 words per plan step 1) as
-``idea_text`` and ``files_referenced`` as ``files_in_scope``. The
-filter applies the M3 D-9 minimal-relevance rule and the 1500-token
-cap; we serialize the survivors as a Markdown list and append.
+with the spec ``Intent`` (truncated to ≤200 words) as ``idea_text`` and
+``files_referenced`` as ``files_in_scope``. The filter applies the
+minimal-relevance rule and the 1500-token cap; we serialize the
+survivors as a Markdown list and append.
 
 Reviewer mandate — explicit Markdown table format spec. The
-dispatcher's parser (P2/P3) ingests rows shaped exactly as the mandate
+dispatcher's parser ingests rows shaped exactly as the mandate
 documents, so any wording drift here breaks the parse downstream.
 """
 
@@ -50,9 +50,9 @@ from typing import Any
 from tools.constitution import Article, load_and_filter
 from tools.state import read_state
 
-# Intent body cap per plan step 1 — the spec Intent often runs long
-# enough to crowd out the rest of the prompt; 200 words preserves the
-# *why* without crowding the slice list / diff.
+# Intent body cap — the spec Intent often runs long enough to crowd out
+# the rest of the prompt; 200 words preserves the *why* without crowding
+# the slice list / diff.
 _INTENT_WORD_CAP: int = 200
 
 # Files in scope: <comma list>  — extracted line-by-line, not via regex
@@ -61,9 +61,9 @@ _INTENT_WORD_CAP: int = 200
 # line after stripping leading Markdown emphasis (``**``).
 _FILES_IN_SCOPE_MARKER: str = "Files in scope:"
 
-# Reviewer mandate footer — frozen verbatim so the P2/P3 parser sees a
-# stable contract. Severities and Status defaults are part of the spec
-# §5.3.3 step 2 row shape.
+# Reviewer mandate footer — frozen verbatim so the dispatcher's parser
+# sees a stable contract. Severities and Status defaults are part of the
+# spec §5.3.3 step 2 row shape.
 _REVIEWER_MANDATE: str = """\
 ## Reviewer Mandate
 
@@ -119,9 +119,9 @@ def _feature_root(repo_root: Path, feature_id: str) -> Path:
 def _read_required(path: Path, label: str, feature_id: str) -> str:
     """Read ``path`` or raise ``FileNotFoundError`` naming the feature.
 
-    Plan §P1.4 failure modes: missing SPEC.md and missing PLAN.md
-    (target=plan only) raise so the operator sees an explicit signal
-    rather than a silently empty prompt body.
+    Failure modes: missing SPEC.md and missing PLAN.md (target=plan only)
+    raise so the operator sees an explicit signal rather than a silently
+    empty prompt body.
     """
     if not path.exists():
         raise FileNotFoundError(f"{label} not found for feature {feature_id!r} at {path}")
@@ -241,10 +241,10 @@ def _serialize_articles(articles: list[Article]) -> str:
 def _spec_creation_sha(state_payload: dict[str, Any]) -> str | None:
     """Resolve the spec-creation SHA used as the diff's ``A..HEAD`` base.
 
-    Plan step 4: prefer ``state.json["created_at_sha"]`` if present,
-    otherwise fall back to the first entry in ``state.commits[]``.
-    Returns ``None`` when neither is available so the caller can emit
-    the empty-commits annotation rather than ``None..HEAD``.
+    Prefer ``state.json["created_at_sha"]`` when present; otherwise fall
+    back to the first entry in ``state.commits[]``. Returns ``None`` when
+    neither is available so the caller can emit the empty-commits
+    annotation rather than ``None..HEAD``.
     """
     explicit = state_payload.get("created_at_sha")
     if isinstance(explicit, str) and explicit:
@@ -310,7 +310,7 @@ def _build_code_diff_block(
 ) -> tuple[str, tuple[PurePosixPath, ...], int]:
     """Build the ``## Diff`` Markdown block, file inventory, and LOC count.
 
-    Failure modes per plan step 4 + §P1.4 failure-modes block:
+    Failure modes:
 
     * Empty ``state.commits[]`` (no spec-creation SHA resolvable) →
       ``_diff unavailable: no commits recorded_`` annotation; empty
@@ -467,9 +467,9 @@ def build_prompt(
         diff_block, files_referenced, diff_loc = _build_code_diff_block(repo_root, state_payload)
         chunks.append(diff_block)
 
-    # Constitution articles (P3 helper). The filter reads
-    # .forge/CONSTITUTION.md, scopes by intent + files, and respects
-    # the 1500-token cap. Empty result → empty string, no leak.
+    # Constitution articles. The filter reads .forge/CONSTITUTION.md,
+    # scopes by intent + files, and respects the 1500-token cap. Empty
+    # result → empty string, no leak.
     kept_articles, _dropped = load_and_filter(
         repo_root,
         idea_text=intent_body,

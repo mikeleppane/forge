@@ -39,7 +39,7 @@ Public surface (in ``__all__``)
 * :func:`write_response_to_disk` — atomic write of a captured
   reviewer response to
   ``.forge/features/<feature_id>/cross-ai/<target>-<utc>-response.md``.
-  Mirrors the P2.1 :func:`tools.cross_ai.manual.write_prompt_to_disk`
+  Mirrors the :func:`tools.cross_ai.manual.write_prompt_to_disk`
   shape so the two artifacts sit side-by-side in the same directory
   with parallel filename conventions.
 
@@ -340,7 +340,7 @@ def write_response_to_disk(
 
     The destination is
     ``<repo_root>/.forge/features/<feature_id>/cross-ai/<target>-<utc>-response.md``.
-    Mirrors the P2.1 :func:`tools.cross_ai.manual.write_prompt_to_disk`
+    Mirrors the :func:`tools.cross_ai.manual.write_prompt_to_disk`
     shape so the prompt and the response sit side-by-side with parallel
     filename conventions; the only delta is the ``-response`` suffix in
     place of ``-prompt``.

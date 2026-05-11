@@ -243,7 +243,7 @@ def test_skill_cleanup_hook_calls_cleanup_seeded_feature() -> None:
 
 def test_command_argument_hint_matches_refine_convention() -> None:
     text = _read(COMMAND_PATH)
-    assert 'argument-hint: "<idea> [--focused | --standard | --full]"' in text, (
+    assert 'argument-hint: "<idea> [--focused | --standard | --full] [--research]"' in text, (
         "commands/do.md must declare the locked argument-hint exactly"
     )
 
@@ -662,4 +662,72 @@ def test_skill_drops_unconditional_research_skip_claim() -> None:
     assert "research stays skipped on all three" not in text, (
         "SKILL.md must NOT claim the research deferral entry is present "
         "on every tier; full and standard-with-research suppress it"
+    )
+
+
+# ---------------------------------------------------------------------------
+# commands/do.md --research documentation locks
+# ---------------------------------------------------------------------------
+
+
+def test_command_documents_research_flag() -> None:
+    """commands/do.md must document the optional ``--research`` flag.
+
+    Mirrors the SKILL.md inputs lock — operators grepping the command
+    file for valid flags must see ``--research`` listed alongside the
+    tier flags.
+    """
+    text = _read(COMMAND_PATH)
+    assert "`--research`" in text, "commands/do.md must document --research as an optional flag"
+
+
+def test_command_documents_focused_research_refusal() -> None:
+    """commands/do.md must carry the focused + ``--research`` refusal hint.
+
+    The literal hint mirrors the SKILL.md and routing helper wording so
+    the contract surface is identical wherever an operator reads it.
+    """
+    text = _read(COMMAND_PATH)
+    expected = 'research escalates to standard tier; use /forge:do --standard --research "<idea>"'
+    assert expected in text, (
+        f"commands/do.md must carry the focused+--research refusal hint {expected!r}"
+    )
+
+
+def test_command_documents_tier_phase_counts() -> None:
+    """commands/do.md must document per-tier phase counts.
+
+    The tier table is the operator-facing summary of the lifecycle. It
+    must enumerate focused (3), standard (8), standard with research
+    (9), and full (11 or 12 with v3) so a reader can decide which tier
+    + flag combination matches their feature without grepping skill
+    prose.
+    """
+    text = _read(COMMAND_PATH)
+    # Phase-count anchors — each tier must be locatable via its number
+    # paired with a recognisable label.
+    assert "| focused |" in text
+    assert "| 3 |" in text
+    assert "| standard |" in text
+    assert "| 8 |" in text
+    assert "standard + research" in text
+    assert "| 9 |" in text
+    assert "| full |" in text
+    # Full tier carries a parenthetical note about v3 + qa.
+    assert "11 (12 with `flow_version: 3`)" in text
+
+
+def test_command_dispatch_summary_includes_research_branch() -> None:
+    """commands/do.md description + lifecycle prose must surface the
+    research dispatch branch.
+
+    Without this lock the command file could silently drop the
+    research dispatch surface and operators would have no
+    command-level signal that ``--standard --research`` routes
+    differently from bare ``--standard``.
+    """
+    text = _read(COMMAND_PATH)
+    assert "/forge:research" in text, (
+        "commands/do.md must reference /forge:research as the dispatch "
+        "target for standard --research seeds"
     )

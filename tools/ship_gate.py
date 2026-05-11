@@ -61,7 +61,11 @@ class ShipGateError(RuntimeError):
 
 
 _TAG_RE = re.compile(r"\[constitution:(A\d+)\]")
-_LESSON_TAG_RE = re.compile(r"\[lesson:(L\d+)\]")
+# Lesson ids are zero-padded 3-digit by parser contract. Match the same shape
+# at the tag level so a malformed [lesson:L1] surfaces as 'no lesson tag'
+# (and the row falls out of the gate's scope entirely) instead of becoming
+# a bewildering 'unknown lesson id' error from the partitioner downstream.
+_LESSON_TAG_RE = re.compile(r"\[lesson:(L\d{3})\]")
 # Lesson severity vocabulary {CRITICAL, HIGH, MEDIUM, LOW} mapped onto the
 # ship-gate severity vocabulary {BLOCK, HIGH, MEDIUM, LOW}. The reviewer copies
 # the lesson's Severity field into the row's Severity cell after running it

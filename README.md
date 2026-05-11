@@ -351,7 +351,6 @@ clear, actionable error message that names the offending row.
 {
   "feature_id": "2026-05-10-fix-csv-import-error-handling",
   "tier": "focused",
-  "flow_version": 3,
   "current_phase": "execute",
   "phases": {
     "spec":    { "status": "done",        "completed_at": "2026-05-10T10:14:02Z" },
@@ -360,9 +359,14 @@ clear, actionable error message that names the offending row.
   },
   "skipped":    [{ "phase": "research", "reason": "research deferred; manual research acceptable" }],
   "deviations": [],
-  "commits":    ["abc1234", "def5678"]
+  "commits": [
+    { "sha": "abc1234", "phase": "spec",    "subject": "spec(csv-import): draft acceptance criteria" },
+    { "sha": "def5678", "phase": "execute", "subject": "test(csv-import): cover empty CSV path" }
+  ]
 }
 ```
+
+`flow_version` is omitted here on purpose — it is a post-ship migration sentinel (added by `tools.state.migrate_to_v3` only after a feature ships) and is never present on a focused-tier mid-execute state.
 
 ---
 

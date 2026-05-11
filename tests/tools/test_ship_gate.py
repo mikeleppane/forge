@@ -169,13 +169,13 @@ def test_make_acknowledgement_hook_writes_state_and_decisions(tmp_path: Path) ->
     assert deviation["phase"] == "ship"
     # Cause prefix MUST share a 60-char substring with the decisions heading title
     # so the existing `validate_deviations` cross-ref passes.
-    assert deviation["cause"].lower().startswith("constitution finding acknowledged at ship:"), (
+    assert deviation["cause"].lower().startswith("ship-gate finding acknowledged at ship:"), (
         f"cause={deviation['cause']!r} must align with decisions title prefix"
     )
     assert "[constitution:A1]" in deviation["cause"]
     assert deviation["resolution"] == "user_acknowledged"
     decisions = decisions_path.read_text(encoding="utf-8")
-    assert "Constitution finding acknowledged at ship" in decisions
+    assert "Ship-gate finding acknowledged at ship" in decisions
     assert "src/services/checkout.py:142" in decisions
 
 
@@ -273,7 +273,7 @@ def test_ack_hook_recovers_from_state_write_failure(
 
     # Decisions heading was written on the first attempt.
     decisions_after_fail = decisions_path.read_text(encoding="utf-8")
-    assert "Constitution finding acknowledged at ship" in decisions_after_fail
+    assert "Ship-gate finding acknowledged at ship" in decisions_after_fail
     # State unchanged from initial.
     assert json.loads(state_path.read_text(encoding="utf-8"))["deviations"] == []
 
@@ -288,7 +288,7 @@ def test_ack_hook_recovers_from_state_write_failure(
     # orphan heading from the first attempt and skipped re-appending. The
     # phrase itself appears twice per entry (heading line + Cause: body line),
     # so count the heading marker instead.
-    assert final_decisions.count("## 2026-05-07 — Constitution finding acknowledged at ship") == 1
+    assert final_decisions.count("## 2026-05-07 — Ship-gate finding acknowledged at ship") == 1
 
 
 def test_render_gate_prompt_raises_on_unknown_article_id() -> None:
@@ -554,7 +554,7 @@ def test_ack_hook_creates_decisions_file_with_h1_header_when_missing(tmp_path: P
     assert text.startswith("# Decisions\n"), (
         f"auto-created decisions.md must lead with `# Decisions` H1, got {text[:64]!r}"
     )
-    assert "Constitution finding acknowledged at ship" in text
+    assert "Ship-gate finding acknowledged at ship" in text
 
 
 def test_ack_hook_raises_ship_gate_error_on_corrupt_state_json(tmp_path: Path) -> None:
@@ -1109,16 +1109,31 @@ def test_partition_by_lesson_severity_filters_out_article_findings() -> None:
     assert article_finding not in info
 
 
-def test_partition_by_lesson_severity_unknown_lesson_id_raises() -> None:
-    """A lesson_id absent from the supplied lessons list surfaces loudly."""
+def test_partition_by_lesson_severity_unknown_lesson_id_routes_to_info() -> None:
+    """A lesson_id absent from the supplied lessons list surfaces via the
+    ``routing_warnings`` diagnostic channel instead of raising.
+
+    Pre-fix the partitioner raised ``ShipGateError`` and blocked the user
+    from reaching the ACK prompt — a stray tag became an unrecoverable
+    ship state. The downgrade routes the row to ``info`` (with a synthetic
+    LOW finding mentioning the typo'd id) so ship can proceed, while the
+    ``routing_warnings`` channel still surfaces the typo for cleanup.
+    """
     finding = sg.ShipFinding(
         lesson_id="L999",
         severity="HIGH",
         location="src/x.py:1",
         message="[lesson:L999] stale",
     )
-    with pytest.raises(sg.ShipGateError, match="unknown lesson id"):
-        sg.partition_by_lesson_severity([finding], _lessons_default())
+    result = sg.partition_by_lesson_severity([finding], _lessons_default())
+    gate, warn, info = result
+    assert gate == []
+    assert warn == []
+    assert len(info) == 1
+    assert info[0].lesson_id == "L999"
+    assert info[0].severity == "LOW"
+    warnings = sg.routing_warnings(result)
+    assert any("L999" in w for w in warnings)
 
 
 def test_partition_by_lesson_severity_mismatched_severity_raises() -> None:
@@ -1161,10 +1176,17 @@ def test_partition_by_lesson_severity_batches_all_mismatches(tmp_path: Path) -> 
     assert "src/b.py:1" in msg
 
 
-def test_partition_by_lesson_severity_batches_unknown_and_mismatch_together(
+def test_partition_by_lesson_severity_unknown_and_mismatch_use_separate_channels(
     tmp_path: Path,
 ) -> None:
-    """Unknown-lesson and severity-mismatch errors batch into the same raise."""
+    """Severity-mismatch still raises (real config bug); unknown lesson ids
+    downgrade to the ``routing_warnings`` channel (recoverable typo).
+
+    Pre-fix both classes of error joined the same ``routing_errors``
+    accumulator and raised together. Splitting the channels lets ship
+    proceed past typo'd tags while still loudly blocking on real Severity
+    drift between the row's cell and the lesson's source-of-truth field.
+    """
     unknown = sg.ShipFinding(
         lesson_id="L999",
         severity="HIGH",
@@ -1177,11 +1199,19 @@ def test_partition_by_lesson_severity_batches_unknown_and_mismatch_together(
         location="src/m.py:1",
         message="[lesson:L030] m",
     )
+    # The Severity-mismatch row raises regardless of the unknown-id row's
+    # presence — real configuration bugs cannot ride along under the
+    # recoverable warning channel.
     with pytest.raises(sg.ShipGateError) as exc:
         sg.partition_by_lesson_severity([unknown, mismatch], _lessons_default())
     msg = str(exc.value)
-    assert "unknown lesson id" in msg
     assert "disagrees with lesson L030" in msg
+    # The unknown-id row does NOT appear in the raise — it joined the
+    # warnings channel instead. Confirm by partitioning the unknown row on
+    # its own.
+    unknown_only = sg.partition_by_lesson_severity([unknown], _lessons_default())
+    warnings = sg.routing_warnings(unknown_only)
+    assert any("L999" in w for w in warnings)
 
 
 def test_partition_by_lesson_severity_multiple_lessons_split_correctly() -> None:
@@ -1408,7 +1438,7 @@ def test_ack_hook_records_lesson_kind_acknowledgement(tmp_path: Path) -> None:
     assert payload["deviations"], "deviation entry must be appended"
     cause = payload["deviations"][-1]["cause"]
     assert "[lesson:L007]" in cause
-    assert cause.lower().startswith("constitution finding acknowledged at ship:")
+    assert cause.lower().startswith("ship-gate finding acknowledged at ship:")
     decisions = decisions_path.read_text(encoding="utf-8")
     assert "[lesson:L007]" in decisions
     assert "async fixture teardown leaks DB sessions" in decisions

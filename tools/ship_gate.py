@@ -103,6 +103,11 @@ _VALID_SEVERITY_VALUES: frozenset[str] = frozenset({"BLOCK", "HIGH", "MEDIUM", "
 _VALID_RESOLVED_BY_PATTERN = re.compile(
     r"^([0-9a-f]{40}|spec-edit|plan-edit|accepted-risk:.{1,200})$"
 )
+# 40-hex SHA detector used to gate the case-normalization branch in
+# ``_findings_from_row``. The full vocabulary above is case-sensitive by
+# design (the literals must match verbatim); only the SHA form gets
+# lowercased before re-running the vocabulary regex.
+_HEX_40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 # Refuse to parse a REVIEW file larger than this cap. A typical REVIEW.code.md
 # holds a couple of dozen findings; 1 MiB is several orders of magnitude past
@@ -130,6 +135,12 @@ class ShipFinding:
 
     article_id: str | None = None
     severity: str  # BLOCK|HIGH|MEDIUM|LOW
+    # ``resolved_by`` carries the 40-hex SHA, the literal ``spec-edit`` /
+    # ``plan-edit``, or ``accepted-risk:<reason>`` from the REVIEW.md cell.
+    # SHA values are normalized to lowercase at parse time so downstream
+    # comparisons stay deterministic regardless of whether the reviewer
+    # pasted upper- or mixed-case hex from a git GUI; the literal forms are
+    # case-sensitive and stored verbatim.
     resolved_by: str | None = None
     location: str
     message: str
@@ -331,15 +342,25 @@ def _findings_from_row(
     # layout). Column present but cell empty → resolved_by=None. Column
     # present with content → must match the 40-hex SHA / spec-edit / plan-edit
     # / accepted-risk:<reason> vocabulary or we raise.
+    #
+    # SHA normalization: a reviewer copying a SHA from a git GUI may land
+    # mixed-case hex in the cell ("Aa1Bb2..."). Lowercase here at parse time
+    # so downstream comparisons (commit lookup, harvest-hook key match) stay
+    # deterministic regardless of which client produced the cell value. Only
+    # the SHA form normalizes; the "spec-edit" / "plan-edit" / "accepted-risk:"
+    # literals are case-sensitive by design.
     resolved_by: str | None = None
     if resolved_by_col >= 0:
         resolved_by_raw = cells[resolved_by_col].strip()
         if resolved_by_raw:
-            if not _VALID_RESOLVED_BY_PATTERN.match(resolved_by_raw):
+            normalized = (
+                resolved_by_raw.lower() if _HEX_40_RE.match(resolved_by_raw) else resolved_by_raw
+            )
+            if not _VALID_RESOLVED_BY_PATTERN.match(normalized):
                 raise ShipGateError(
                     f"unrecognized Resolved by value: {resolved_by_raw!r} in {source}"
                 )
-            resolved_by = resolved_by_raw
+            resolved_by = normalized
     # findall keeps every tag in declaration order; one ShipFinding per tag
     # so each routes through its partitioner on its own merits. Article tags
     # are emitted first, then lesson tags — pinned by the test suite so
@@ -367,10 +388,66 @@ def _findings_from_row(
     return out
 
 
+class _PartitionResult(tuple[list[ShipFinding], list[ShipFinding], list[ShipFinding]]):
+    """Three-bucket partition tuple with a sidecar ``routing_warnings`` channel.
+
+    Subclasses :class:`tuple` so existing callers can still unpack
+    ``gate, warn, info = partition_by_...(findings, ...)`` byte-equal with the
+    legacy contract. The sidecar field carries diagnostic strings for
+    typo-class issues (unknown lesson id, unknown article id) that pre-fix
+    raised ``ShipGateError`` and blocked ship outright. Real configuration
+    bugs (Severity-mismatch) still raise — they reach a different code path
+    inside :func:`partition_by_lesson_severity`.
+
+    The class is private; access ``routing_warnings`` via the module-level
+    :func:`routing_warnings` helper instead of touching the attribute
+    directly so the seam stays stable across future refactors. ``__slots__``
+    is intentionally omitted — Python forbids non-empty ``__slots__`` on
+    :class:`tuple` subclasses, so the attribute lives on the per-instance
+    dict.
+    """
+
+    def __new__(
+        cls,
+        gate: list[ShipFinding],
+        warn: list[ShipFinding],
+        info: list[ShipFinding],
+        *,
+        routing_warnings: tuple[str, ...] = (),
+    ) -> _PartitionResult:
+        # Build via tuple.__new__ so identity-equality with a plain three-tuple
+        # of the same lists holds (existing tests compare directly).
+        self = super().__new__(cls, (gate, warn, info))
+        self._routing_warnings = routing_warnings
+        return self
+
+    _routing_warnings: tuple[str, ...]
+
+
+def routing_warnings(
+    partition: tuple[list[ShipFinding], list[ShipFinding], list[ShipFinding]],
+) -> tuple[str, ...]:
+    """Return the diagnostic ``routing_warnings`` channel for a partition.
+
+    The channel is populated when :func:`partition_by_article_level` or
+    :func:`partition_by_lesson_severity` encountered an unknown tag id — a
+    stray ``[lesson:L042]`` whose lesson is absent or retired, or a stale
+    ``[constitution:A99]`` after an article was renamed. The synthetic info
+    finding routes the row past the gate so ship can proceed; this channel
+    surfaces the typo so the user can clean it up at leisure.
+
+    A plain three-tuple result (e.g. a future caller building a partition by
+    hand) returns ``()``. Real configuration bugs (Severity-mismatch between
+    a row's Severity cell and the lesson's source-of-truth Severity field)
+    still raise ``ShipGateError`` upstream of this function.
+    """
+    return getattr(partition, "_routing_warnings", ())
+
+
 def partition_by_article_level(
     findings: Iterable[ShipFinding],
     articles: list[Article],
-) -> tuple[list[ShipFinding], list[ShipFinding], list[ShipFinding]]:
+) -> _PartitionResult:
     """Bucket findings into (gate, warn, info) by ARTICLE LEVEL alone.
 
     Severity is treated as advisory metadata at this layer — the SKILL
@@ -387,27 +464,42 @@ def partition_by_article_level(
         articles: Loaded Constitution articles used to resolve levels.
 
     Returns:
-        Tuple ``(gate, warn, info)``:
+        :class:`_PartitionResult` — a tuple ``(gate, warn, info)`` carrying
+        an additional ``routing_warnings`` channel surfaced via the
+        :func:`routing_warnings` helper:
+
             - ``gate``: article level == ``CRITICAL``.
             - ``warn``: article level == ``SHOULD``.
             - ``info``: article level == ``MAY``, plus findings whose
               article id is not present in ``articles`` (unknown article).
+            - ``routing_warnings``: one diagnostic string per unknown
+              article id, naming the id and source location so the user can
+              fix the typo at leisure.
 
-    Asymmetry vs :func:`partition_by_lesson_severity`: unknown article ids
-    silently route to ``info`` here, but unknown lesson ids ``raise``
-    downstream. Articles are renamed during convergence often enough that a
-    stale tag ref is benign cleanup work; lessons are append-only with
-    permanent ids, so a stale lesson tag is a real authoring fault worth
-    surfacing loudly.
+    Symmetric with :func:`partition_by_lesson_severity`: both partitioners
+    route unknown ids to ``info`` and surface a non-blocking diagnostic via
+    ``routing_warnings`` instead of raising. The article path additionally
+    routes findings whose article exists but is rated ``MAY`` to ``info``
+    without a warning — those are clean routes, not typos.
     """
     by_id = {a.id: a for a in articles}
     gate: list[ShipFinding] = []
     warn: list[ShipFinding] = []
     info: list[ShipFinding] = []
+    warnings: list[str] = []
     for f in findings:
         article = by_id.get(f.article_id) if f.article_id else None
         if article is None:
             info.append(f)
+            if f.article_id is not None:
+                # Surface the typo so the user can clean it up; do NOT block
+                # ship — articles get renamed during convergence often enough
+                # that a stale tag is benign cleanup work, not a real bug.
+                warnings.append(
+                    f"unknown article id {f.article_id!r} at {f.location} "
+                    f"(tag may be a typo or reference an article renamed during "
+                    f"convergence)"
+                )
             continue
         if article.level == "CRITICAL":
             gate.append(f)
@@ -415,13 +507,13 @@ def partition_by_article_level(
             warn.append(f)
         else:
             info.append(f)
-    return gate, warn, info
+    return _PartitionResult(gate, warn, info, routing_warnings=tuple(warnings))
 
 
 def partition_by_lesson_severity(
     findings: Iterable[ShipFinding],
     lessons: Iterable[Lesson],
-) -> tuple[list[ShipFinding], list[ShipFinding], list[ShipFinding]]:
+) -> _PartitionResult:
     """Three-way split of lesson-tagged ``ShipFinding`` rows.
 
     Only findings with ``kind == "lesson"`` are considered; article-kind
@@ -436,12 +528,20 @@ def partition_by_lesson_severity(
     - ``LOW``      -> info.
 
     Consistency check: the row's Severity cell SHOULD match
-    ``_lesson_to_ship_severity(lesson.severity)``. A mismatch raises
-    :class:`ShipGateError` naming both values; the reviewer subagent is
-    expected to keep the cell synchronised with the lesson, and making the
-    mismatch loud forces that discipline (silent drift would otherwise let
-    a CRITICAL lesson route to warn because the reviewer typed ``MEDIUM``
-    in the cell).
+    ``_lesson_to_ship_severity(lesson.severity)``. A mismatch is a real
+    configuration bug — the reviewer subagent must keep the cell synchronised
+    with the lesson, and a silent drift would let a CRITICAL lesson route to
+    warn because the reviewer typed ``MEDIUM`` in the cell. Severity-mismatch
+    therefore still raises :class:`ShipGateError` (loud, blocking, demands a
+    fix-then-reship).
+
+    Unknown-id handling is DIFFERENT: a stray ``[lesson:L042]`` whose lesson
+    is missing (typo, retired entry filtered out of the active set, paste
+    error) downgrades to a synthetic LOW finding in the ``info`` bucket plus
+    a non-blocking diagnostic on the ``routing_warnings`` channel. Pre-fix
+    this raised ``ShipGateError`` and blocked the user from reaching ACK;
+    the downgrade lets ship proceed while still surfacing the typo so the
+    user can clean it up at leisure.
 
     Args:
         findings: Iterable of parsed ``ShipFinding`` rows; article-kind
@@ -450,23 +550,26 @@ def partition_by_lesson_severity(
             ``lesson_id``.
 
     Returns:
-        Tuple ``(gate, warn, info)`` of lesson-kind findings.
+        :class:`_PartitionResult` — tuple ``(gate, warn, info)`` of
+        lesson-kind findings, plus a ``routing_warnings`` channel surfaced
+        via :func:`routing_warnings` (one diagnostic per unknown lesson id).
 
     Raises:
-        ShipGateError: When a lesson-kind finding references a ``lesson_id``
-            not present in ``lessons`` (stale tag, retired/removed lesson),
-            or when the row's Severity cell disagrees with the lesson's
-            Severity field after the ship-severity mapping.
+        ShipGateError: When the row's Severity cell disagrees with the
+            lesson's Severity field after the ship-severity mapping (real
+            config bug, not a typo). Unknown lesson ids do NOT raise — they
+            route to ``info`` and surface via ``routing_warnings``.
     """
     by_id = {le.id: le for le in lessons}
     gate: list[ShipFinding] = []
     warn: list[ShipFinding] = []
     info: list[ShipFinding] = []
-    # Accumulate ALL routing errors so a REVIEW.md with N misaligned rows
-    # surfaces them in a single raise instead of forcing N fix-then-reship
-    # cycles. The ShipFinding constructor enforces exactly-one-id; the
-    # ``is_lesson`` filter is the only thing left to gate on here.
+    # Two channels: ``routing_errors`` for real configuration bugs that still
+    # raise; ``warnings`` for typo-class issues that downgrade to info plus a
+    # diagnostic. Pre-fix unknown-id joined routing_errors and blocked ship;
+    # now it joins ``warnings`` and ship proceeds.
     routing_errors: list[str] = []
+    warnings: list[str] = []
     for f in findings:
         if not f.is_lesson:
             continue
@@ -475,7 +578,22 @@ def partition_by_lesson_severity(
         assert f.lesson_id is not None  # noqa: S101 — typing aid for mypy
         lesson = by_id.get(f.lesson_id)
         if lesson is None:
-            routing_errors.append(
+            # Synthetic LOW finding in info bucket — preserves the row's
+            # location so the user can find the typo, and keeps the original
+            # tag in the message body so REVIEW.md grep locates it.
+            synthetic = ShipFinding(
+                lesson_id=f.lesson_id,
+                severity="LOW",
+                location=f.location,
+                message=(
+                    f"unknown lesson id {f.lesson_id!r} — tag may be a typo "
+                    f"or reference a removed lesson (original row message: "
+                    f"{f.message})"
+                ),
+                resolved_by=f.resolved_by,
+            )
+            info.append(synthetic)
+            warnings.append(
                 f"unknown lesson id {f.lesson_id!r} at {f.location} "
                 f"(stale tag or retired lesson removed from .forge/intel/lessons.md)"
             )
@@ -500,7 +618,7 @@ def partition_by_lesson_severity(
             f"partition_by_lesson_severity: {len(routing_errors)} row(s) failed routing:\n"
             f"  - {bullets}"
         )
-    return gate, warn, info
+    return _PartitionResult(gate, warn, info, routing_warnings=tuple(warnings))
 
 
 _INLINE_BACKTICK_RUN_RE = re.compile(r"`+")
@@ -730,7 +848,14 @@ def render_warn_summary(
 # cross-ref passes. Single literal — the heading and the cause string are
 # textually identical, so a single source kills the drift risk that two
 # parallel constants invited.
-_ACK_PREFIX = "Constitution finding acknowledged at ship"
+#
+# The prefix reads "Ship-gate finding ..." (covers both constitution-article
+# and lesson-kind acknowledgements). The earlier "Constitution finding ..."
+# wording was misleading for lesson-kind ACK rows, where no Constitution
+# article is involved; the body's ``Cause:`` line still carries the actual
+# ``[constitution:A<n>]`` / ``[lesson:L<NNN>]`` tag so the cross-ref locates
+# the heading via the body group regardless of the title's content.
+_ACK_PREFIX = "Ship-gate finding acknowledged at ship"
 
 
 def make_acknowledgement_hook(
@@ -862,22 +987,23 @@ def make_acknowledgement_hook(
                 f"Cause: {cause}",
             ]
             for f in gate_findings:
+                # Strip BOTH tag regexes regardless of the finding's kind so a
+                # mixed-tag REVIEW row (e.g. one row carrying both
+                # ``[constitution:A2]`` and ``[lesson:L007]``) cannot leak the
+                # OTHER tag into the bullet body. The bullet's own leading tag
+                # is rebuilt from ``f.article_id`` / ``f.lesson_id`` after the
+                # strip, so duplicate or cross-kind tag echoes are removed
+                # symmetrically.
+                clean_message = _TAG_RE.sub("", _LESSON_TAG_RE.sub("", f.message)).strip(" -")
                 if f.is_lesson:
                     lesson = lesson_by_id.get(f.lesson_id or "")
                     title = _lesson_title_fragment(lesson) if lesson else "(unknown)"
-                    # Strip every [lesson:L<NNN>] from the reviewer message so
-                    # tag echoes do not pile up alongside the bullet's own
-                    # leading tag, even when a row carried duplicate tags.
-                    clean_message = _LESSON_TAG_RE.sub("", f.message).lstrip(" -")
                     body_lines.append(
                         f"- [lesson:{f.lesson_id}] **{title}** — {f.location} — {clean_message}"
                     )
                     continue
                 article = by_id.get(f.article_id or "")
                 title = article.title if article else "(unknown)"
-                # Strip every [constitution:A<n>] from the reviewer message so
-                # duplicate tag mentions do not double-echo onto the bullet.
-                clean_message = _TAG_RE.sub("", f.message).lstrip(" -")
                 body_lines.append(
                     f"- [constitution:{f.article_id}] **{title}** — {f.location} — {clean_message}"
                 )
@@ -924,6 +1050,7 @@ _GIT_CONV_GATE_FOOTER = (
     "before re-running /forge:ship."
 )
 _GIT_CONV_WARN_HEADER = "Git-convention findings (advisory):"
+_GIT_CONV_INFO_HEADER = "Git-convention findings (informational):"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1054,4 +1181,31 @@ def render_git_conventions_warn_summary(partition: GitConventionGatePartition) -
         return ""
     lines = [_GIT_CONV_WARN_HEADER]
     lines.extend(f"- {f.message}  [{f.severity}]" for f in partition.warn)
+    return "\n".join(lines)
+
+
+def render_git_conventions_info_summary(partition: GitConventionGatePartition) -> str:
+    """Render LOW / WARN / INFO findings as an informational summary line block.
+
+    Empty info bucket returns the empty string — the common case, since LOW
+    / WARN / INFO findings are rare in normal commit hygiene. One line per
+    finding when populated, structure mirrors
+    :func:`render_git_conventions_warn_summary` so diagnostic CLI tools and
+    skill prose can render either with a single visual rhythm. The info
+    bucket has no consumer in the ship-time gate proper (info findings do
+    not block ship and are not surfaced via the ACK prompt); this renderer
+    exists so a future ``forge-ship`` skill prose update or a diagnostic
+    CLI inspector can fold info findings into its output without inventing
+    a parallel renderer.
+
+    Args:
+        partition: A partition produced by :func:`partition_git_conventions`.
+
+    Returns:
+        Multiline string, or ``""`` when the info bucket is empty.
+    """
+    if not partition.info:
+        return ""
+    lines = [_GIT_CONV_INFO_HEADER]
+    lines.extend(f"- {f.message}  [{f.severity}]" for f in partition.info)
     return "\n".join(lines)

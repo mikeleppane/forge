@@ -76,6 +76,10 @@ _REQUIRED_FIELDS = ("captured", "resolved_by", "trap", "avoidance", "tags", "sev
 
 _CAPTURED_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+from\s+feature\s+(\S+)\s*$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# Case-insensitive detector used to gate SHA normalization at parse time so
+# uppercase / mixed-case hex from a git GUI normalizes to lowercase before
+# the strict ``_SHA_RE`` check. Symmetric with ``ship_gate._HEX_40_RE``.
+_SHA_RE_INSENSITIVE = re.compile(r"^[0-9a-fA-F]{40}$")
 _SUPERSEDED_RE = re.compile(r"^superseded-by:(L\d{3})$")
 
 # Strip fenced + inline code so illustrative ``## L001`` lines inside code
@@ -299,6 +303,14 @@ def _block_to_lesson(block: dict[str, object]) -> Lesson:
     captured_from = captured_match.group(2)
 
     resolved_by = _expect_str(block, "resolved_by")
+    # SHA normalization: a contributor copying a SHA from a git GUI may land
+    # mixed-case hex. Lowercase here at parse time so downstream comparisons
+    # (commit lookup, harvest-hook key match) stay deterministic regardless
+    # of the input casing. Symmetric with the ``parse_review_findings`` fix
+    # in ``tools.ship_gate``. The literal ``manual`` is case-sensitive by
+    # design and stored verbatim.
+    if resolved_by != "manual" and _SHA_RE_INSENSITIVE.match(resolved_by):
+        resolved_by = resolved_by.lower()
     if resolved_by != "manual" and not _SHA_RE.match(resolved_by):
         raise LessonError(
             f"{prefix}: Resolved-by must be 40-hex SHA or 'manual', got {resolved_by!r}"

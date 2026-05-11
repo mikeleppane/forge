@@ -313,16 +313,16 @@ def tokenize(text: str) -> set[str]:
 
 def extract_scope_keywords(
     *,
-    repo_root: Path,
     idea_text: str = "",
     files_in_scope: Iterable[Path] = (),
 ) -> set[str]:
     """Union scope tokens from idea text and files in scope.
 
-    Read-only. Returns lowercase tokens with stopwords filtered.
+    Read-only. Returns lowercase tokens with stopwords filtered. The
+    function performs no filesystem reads — scope signals come from the
+    caller's already-resolved ``idea_text`` and ``files_in_scope``.
 
     Args:
-        repo_root: Retained for caller compatibility; unused.
         idea_text: Free-form idea / spec intent text.
         files_in_scope: Paths the caller considers in scope; their string
             forms feed the tokenizer.
@@ -330,7 +330,6 @@ def extract_scope_keywords(
     Returns:
         Union set of all derived scope keywords.
     """
-    del repo_root  # retained in signature for caller compat
     keywords: set[str] = set()
     keywords |= tokenize(idea_text)
     for path in files_in_scope:
@@ -472,7 +471,6 @@ def load_and_filter(
         return [], []
     articles = parse_constitution(constitution_path)
     keywords = extract_scope_keywords(
-        repo_root=repo_root,
         idea_text=idea_text,
         files_in_scope=files_in_scope,
     )

@@ -48,11 +48,8 @@ def test_tokenize_drops_stopwords_and_short_tokens() -> None:
     assert "via" not in tokens
 
 
-def test_extract_scope_keywords_unions_idea_and_files(tmp_path: Path) -> None:
-    repo = tmp_path / "scope_repo"
-    repo.mkdir()
+def test_extract_scope_keywords_unions_idea_and_files() -> None:
     keywords = cn.extract_scope_keywords(
-        repo_root=repo,
         idea_text="Add a webhook listener for stripe events",
         files_in_scope=[Path("src/webhooks/stripe.py")],
     )

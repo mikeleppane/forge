@@ -11,6 +11,7 @@ Also validates each shipped template's frontmatter against its matching schema:
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -39,14 +40,20 @@ _TEMPLATE_FRONTMATTER_BINDINGS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _check_schema(path: Path) -> None:
+def _emit(message: str, *, quiet: bool) -> None:
+    """Print `message` to stdout unless `quiet` is set."""
+    if not quiet:
+        print(message)
+
+
+def _check_schema(path: Path, *, quiet: bool = False) -> None:
     """Validate a single shipped schema against Draft 2020-12 metaschema."""
     schema = json.loads(path.read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator.check_schema(schema)
-    print(f"OK schema {path.name}")
+    _emit(f"OK schema {path.name}", quiet=quiet)
 
 
-def _check_state_template() -> None:
+def _check_state_template(*, quiet: bool = False) -> None:
     """Validate templates/feature/state.json against state.schema.json."""
     schema = json.loads((SCHEMAS_DIR / "state.schema.json").read_text(encoding="utf-8"))
     template: dict[str, Any] = json.loads(
@@ -56,7 +63,7 @@ def _check_state_template() -> None:
     jsonschema.Draft202012Validator(
         schema, format_checker=jsonschema.Draft202012Validator.FORMAT_CHECKER
     ).validate(template)
-    print("OK template feature/state.json")
+    _emit("OK template feature/state.json", quiet=quiet)
 
 
 def _extract_frontmatter(template_path: Path) -> dict[str, Any]:
@@ -68,7 +75,12 @@ def _extract_frontmatter(template_path: Path) -> dict[str, Any]:
     return parsed
 
 
-def _check_template_frontmatter(template_rel: str, schema_filename: str) -> None:
+def _check_template_frontmatter(
+    template_rel: str,
+    schema_filename: str,
+    *,
+    quiet: bool = False,
+) -> None:
     """Validate one template's YAML frontmatter against its schema."""
     template_path = TEMPLATES_DIR / template_rel
     schema = json.loads((SCHEMAS_DIR / schema_filename).read_text(encoding="utf-8"))
@@ -86,17 +98,47 @@ def _check_template_frontmatter(template_rel: str, schema_filename: str) -> None
     jsonschema.Draft202012Validator(
         schema, format_checker=jsonschema.Draft202012Validator.FORMAT_CHECKER
     ).validate(fm)
-    print(f"OK template {template_rel}")
+    _emit(f"OK template {template_rel}", quiet=quiet)
 
 
-def main() -> int:
-    """Run all schema and template checks; return 0 on success, 1 on failure."""
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="forge-check-schemas",
+        description=(
+            "Validate every shipped FORGE JSON Schema against the Draft 2020-12 "
+            "metaschema, then validate each shipped template's frontmatter "
+            "against its bound schema. Exits 0 when every check passes."
+        ),
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress per-item OK lines on stdout; failures still print to stderr.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run all schema and template checks; return 0 on success, 1 on failure.
+
+    Args:
+        argv: Optional argv override (defaults to ``sys.argv[1:]``).
+
+    Returns:
+        Exit code: 0 when every schema and template is valid, 1 on the first
+        ``SchemaError`` or ``ValidationError``.
+    """
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    quiet: bool = args.quiet
+
     try:
         for path in sorted(SCHEMAS_DIR.glob("*.schema.json")):
-            _check_schema(path)
-        _check_state_template()
+            _check_schema(path, quiet=quiet)
+        _check_state_template(quiet=quiet)
         for template_rel, schema_filename in _TEMPLATE_FRONTMATTER_BINDINGS:
-            _check_template_frontmatter(template_rel, schema_filename)
+            _check_template_frontmatter(template_rel, schema_filename, quiet=quiet)
     except (jsonschema.SchemaError, jsonschema.ValidationError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1

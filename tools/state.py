@@ -45,8 +45,12 @@ _AUTODISCOVER_DEPTH_CAP: Final[int] = 12
 
 
 # Strict feature-id: ``YYYY-MM-DD`` + alnum-leading slug with no trailing
-# hyphen and no consecutive hyphens. Mirrors the regex in
-# tools.archive._FEATURE_ID_RE.
+# hyphen and no consecutive hyphens. Month is constrained to ``01-12`` and
+# day to ``01-31`` so impossible calendar segments (e.g. ``2026-13-99-foo``)
+# are rejected here AND at the schema boundary. The schema pattern at
+# ``schemas/state.schema.json#properties.feature_id.pattern`` mirrors this
+# regex string for byte; the runtime guard in
+# ``tools.archive._FEATURE_ID_RE`` mirrors it too.
 _FEATURE_ID_RE = re.compile(
     r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9]))+$"
 )

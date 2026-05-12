@@ -101,6 +101,66 @@ def test_read_state_rejects_unknown_phase_key(tmp_path: Path, schemas_dir: Path)
         state.read_state(target, schema_path=schemas_dir / "state.schema.json")
 
 
+@pytest.mark.parametrize(
+    "bad_feature_id",
+    [
+        "2026-13-01-foo",  # month 13 is impossible
+        "2026-00-01-foo",  # month 00 is impossible
+        "2026-01-32-foo",  # day 32 is impossible
+        "2026-01-00-foo",  # day 00 is impossible
+        "2026-99-15-foo",  # month 99 is impossible
+    ],
+)
+def test_read_state_rejects_feature_id_with_impossible_calendar_segment(
+    tmp_path: Path,
+    schemas_dir: Path,
+    bad_feature_id: str,
+) -> None:
+    target = tmp_path / "state.json"
+    payload = {
+        "feature_id": bad_feature_id,
+        "tier": "focused",
+        "current_phase": "spec",
+        "phases": {"spec": {"status": "in_progress"}},
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    target.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(state.StateError, match="schema"):
+        state.read_state(target, schema_path=schemas_dir / "state.schema.json")
+
+
+@pytest.mark.parametrize(
+    "good_feature_id",
+    [
+        "2026-01-01-foo",
+        "2026-12-31-bar-baz",
+    ],
+)
+def test_read_state_accepts_feature_id_with_valid_calendar_segment(
+    tmp_path: Path,
+    schemas_dir: Path,
+    good_feature_id: str,
+) -> None:
+    target = tmp_path / "state.json"
+    payload = {
+        "feature_id": good_feature_id,
+        "tier": "focused",
+        "current_phase": "spec",
+        "phases": {"spec": {"status": "in_progress"}},
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    target.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = state.read_state(target, schema_path=schemas_dir / "state.schema.json")
+
+    assert result["feature_id"] == good_feature_id
+
+
 def test_write_state_creates_file_with_pretty_json(tmp_path: Path, schemas_dir: Path) -> None:
     target = tmp_path / "state.json"
     payload = {

@@ -24,8 +24,9 @@ dev = [
 ]
 
 [project.scripts]
-forge-lint-frontmatter = "tools.lint_frontmatter:main"
 forge-check-schemas = "tools.check_schemas:main"
+forge-do = "tools.do_cli:main"
+forge-lint-frontmatter = "tools.lint_frontmatter:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

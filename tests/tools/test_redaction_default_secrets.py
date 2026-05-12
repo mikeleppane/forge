@@ -23,7 +23,7 @@ CASES = [
     ("openai_classic", "sk-" + "Z" * 32),
     ("openai_project", "sk-proj-" + "Y" * 40),
     ("gemini_key", "AIza" + "A" * 35),
-    ("slack_bot", "xoxb-1234567890-9876543210-AbCdEfGhIjKlMnOpQrStUvWx"),
+    ("slack_bot", "xoxb-" + "1" * 10 + "-" + "9" * 10 + "-" + "A" * 24),
     ("pem_rsa", "-----BEGIN RSA PRIVATE KEY-----"),
     ("pem_openssh", "-----BEGIN OPENSSH PRIVATE KEY-----"),
     ("pem_bare", "-----BEGIN PRIVATE KEY-----"),

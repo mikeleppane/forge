@@ -915,7 +915,7 @@ def _emit_constitution_skip_warning(repo_root: Path, feature_id: str) -> None:
 
 
 def ship_feature(
-    repo_root: Path,
+    repo_root: Path | str,
     feature_id: str,
     capability: str,
     body: str,
@@ -960,7 +960,10 @@ def ship_feature(
            parent dir if it was newly created and is now empty), then re-raise.
 
     Args:
-        repo_root: Repository root containing the .forge/ tree.
+        repo_root: Repository root containing the .forge/ tree. A ``str``
+            is accepted at the entry boundary and coerced to ``Path`` so
+            agent callers that improvise on the call shape do not trip a
+            cryptic ``TypeError`` on the first ``/`` operator.
         feature_id: Feature folder name in YYYY-MM-DD-slug form.
         capability: Capability slug (lowercase letters, digits, hyphens).
         body: Full SPEC.md text content (frontmatter + body).
@@ -979,6 +982,7 @@ def ship_feature(
             Hook or archive-step failure rolls back the canonical write before
             re-raising.
     """
+    repo_root = Path(repo_root)
     if pre_archive_hook is None:
         # Advisory only. M3 keeps ship_feature itself unchanged (no
         # raise/abort); the gate hook lives in tools.ship_gate. The warning

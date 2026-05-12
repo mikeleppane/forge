@@ -238,6 +238,30 @@ def test_ship_feature_happy_path_writes_canonical_and_archives(tmp_path: Path) -
     assert not (tmp_path / ".forge" / "features" / feature_id).exists()
 
 
+def test_ship_feature_coerces_string_repo_root(tmp_path: Path) -> None:
+    """Boundary coercion: a string repo_root must not trip ``TypeError``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers that pass a string for an annotated ``Path`` parameter must
+    not crash four frames deep on ``str / ".forge" / ...``.
+    """
+    feature_id = "2026-05-04-toggle-add"
+    capability = "feature-flag"
+    body = (
+        "---\ncapability: feature-flag\nstatus: shipped\n"
+        "created: 2026-05-04\nlast_updated: 2026-05-04\n"
+        "evidence:\n"
+        "  - 2026-05-04-toggle-add: features/archive/2026-05-04-toggle-add/\n"
+        "bounded_context: null\n---\n# Feature Flag\n"
+    )
+    _seed_feature(tmp_path, feature_id, files={"SPEC.md": "# spec\n", "state.json": "{}\n"})
+
+    canonical, archive_path = ship_feature(str(tmp_path), feature_id, capability, body)
+
+    assert canonical == tmp_path / ".forge" / "specs" / capability / "SPEC.md"
+    assert archive_path == tmp_path / ".forge" / "features" / "archive" / feature_id
+
+
 def test_ship_feature_refuses_when_canonical_already_exists(tmp_path: Path) -> None:
     feature_id = "2026-05-04-toggle-add"
     capability = "feature-flag"

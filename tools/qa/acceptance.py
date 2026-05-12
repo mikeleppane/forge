@@ -283,7 +283,7 @@ def _aggregate_verdict(checks: list[PromiseCheck]) -> AcceptanceVerdict:
 
 
 def run_acceptance(
-    repo_root: Path,
+    repo_root: Path | str,
     feature_id: str,
     artifact: ArtifactDescriptor,
     *,
@@ -292,7 +292,11 @@ def run_acceptance(
     """Run the black-box acceptance check for a feature.
 
     Args:
-        repo_root: Repository root the feature folder resolves under.
+        repo_root: Repository root the feature folder resolves under. A
+            ``str`` is accepted at the entry boundary and coerced to
+            ``Path`` so agent callers that improvise on the call shape
+            do not trip a cryptic ``TypeError`` on the first ``/``
+            operator inside SPEC.md resolution.
         feature_id: Feature identifier (e.g. ``2026-05-09-example``).
         artifact: Opaque descriptor of the shipped artifact. The instance is
             forwarded to the runner unchanged.
@@ -309,6 +313,7 @@ def run_acceptance(
     Raises:
         QAError: When the feature's SPEC.md is missing.
     """
+    repo_root = Path(repo_root)
     spec_path = repo_root / ".forge" / "features" / feature_id / "SPEC.md"
     spec_text = _read_text(spec_path)
     if spec_text is None:

@@ -220,6 +220,19 @@ def test_run_acceptance_missing_spec_raises(tmp_path: Path) -> None:
         run_acceptance(tmp_path, "2026-05-09-no-spec", artifact)
 
 
+def test_run_acceptance_coerces_string_repo_root(tmp_path: Path) -> None:
+    """Boundary coercion: a string repo_root must not trip ``TypeError``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers that pass a string for an annotated ``Path`` parameter must
+    not crash four frames deep on ``str / ".forge" / ...``; instead the
+    documented ``QAError`` for a missing SPEC.md should fire.
+    """
+    artifact = ArtifactDescriptor(kind="cli", identifier="anything")
+    with pytest.raises(QAError):
+        run_acceptance(str(tmp_path), "2026-05-09-no-spec", artifact)
+
+
 def test_run_acceptance_runner_missing_promise_id_marked_skipped(tmp_path: Path) -> None:
     feature_id = "2026-05-09-acc-incomplete-runner"
     _write_spec(tmp_path, feature_id, SPEC_FULL)

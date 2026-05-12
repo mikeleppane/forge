@@ -25,6 +25,30 @@ Subagent dispatch:
 - Budget: SPEC § Acceptance + Scenarios + Negative Requirements + Codebase Anchors; `files_in_scope` = whatever the criteria reference.
 - Task: for each acceptance criterion AND each negative requirement, search the codebase for evidence (function presence, conditional logic, type signatures). Mark EVIDENCED / FAIL / UNVERIFIABLE with `path:line` evidence. Use PASS only for scenario execution or UAT-confirmed behavior.
 - Return: list of `{criterion, status, evidence}`.
+- **Required prompt prefix.** The dispatch prompt MUST start with a top-level `context_budget:` block at column 0 (outside any fenced code block). The PreToolUse hook (`hooks/check_budget.py`) refuses dispatches that omit it. Canonical shape — copy verbatim and substitute the bracketed values:
+
+  ```text
+  context_budget:
+  {
+    "spec_sections": ["Acceptance", "Scenarios", "Negative Requirements", "Codebase Anchors"],
+    "files_in_scope": [
+      ".forge/features/<id>/SPEC.md",
+      "<each Codebase Anchors path referenced by acceptance / negative requirements>"
+    ],
+    "forbidden": [
+      "do not edit any file",
+      "do not run pytest",
+      "do not dispatch additional subagents"
+    ],
+    "articles": [ <output of Article.to_budget_dict() for each filtered article, or [] when CONSTITUTION.md is absent> ],
+    "return_format": {
+      "rows": "list[{criterion: str, status: enum[EVIDENCED, FAIL, UNVERIFIABLE], evidence: str}]",
+      "max_words": 600
+    }
+  }
+
+  [task prose follows here, starting with a blank line]
+  ```
 
 ### Layer 2 — Scenario execution (when BDD framework detected)
 

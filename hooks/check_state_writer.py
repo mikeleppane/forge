@@ -6,10 +6,13 @@ Reads the hook input on stdin (JSON). When the dispatched tool is one of
 ``.forge/features/<feature_id>/state.json`` (at any depth), the hook returns
 a PreToolUse deny decision. Otherwise it returns an empty object (allow).
 
-state.json is mechanically owned by the ``tools.state.*`` helpers
-(``complete_phase``, ``start_phase``, ``record_routing_decision``,
-``record_refined_idea``). Direct edits bypass schema validation and produce
-broken seeds; this hook closes that bypass at the tool boundary.
+state.json is mechanically owned by the ``tools.state.*`` and
+``tools.routing.*`` helpers: ``tools.routing.seed_routed_feature`` for the
+initial seed (creating a new state.json from nothing) and
+``complete_phase`` / ``start_phase`` / ``record_routing_decision`` /
+``record_refined_idea`` for in-place transitions. Direct edits bypass
+schema validation and produce broken seeds; this hook closes that bypass
+at the tool boundary.
 
 Stdlib only. Idempotent and side-effect-free.
 
@@ -36,7 +39,9 @@ from typing import Any
 _WRITE_TOOL_NAMES = frozenset({"Write", "Edit", "MultiEdit"})
 
 _DENY_REASON = (
-    "state.json is mechanically owned by tools.state.* — call "
+    "state.json is mechanically owned by the tools.state.* and "
+    "tools.routing.* helpers — call "
+    "tools.routing.seed_routed_feature for the initial seed, or "
     "complete_phase / start_phase / record_routing_decision / "
     "record_refined_idea via the python tooling. Direct "
     "Write/Edit/MultiEdit to state.json is refused."

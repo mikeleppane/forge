@@ -74,6 +74,14 @@ _FEATURE_SLUG_RE: re.Pattern[str] = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-
 # dump (which inlines the entire payload).
 _IDEA_MAX_CHARS: int = 4000
 
+# Schema resolved from the plugin install location, not the caller-supplied
+# ``repo_root``. FORGE's schemas ship with the plugin (this module lives in
+# ``tools/``; ``parents[1]`` is the plugin root). The runtime ``repo_root``
+# points at the user's target repository, which has no obligation to
+# colocate a copy of these schemas. Pattern mirrors ``tools/check_schemas.py``
+# and ``tools/cross_ai/config.py``.
+_STATE_SCHEMA_PATH: Path = Path(__file__).resolve().parents[1] / "schemas" / "state.schema.json"
+
 
 def _resolve_seed_lifecycle(
     *,
@@ -130,9 +138,10 @@ def seed_routed_feature(
     Composes :func:`create_feature_folder` and
     :func:`record_routing_decision` with a post-seed cleanup wrapper so
     ``record_routing_decision`` failures never leave a half-seeded folder
-    behind.  Both helpers receive ``schema_path =
-    repo_root / "schemas/state.schema.json"`` so an invalid payload refuses
-    BEFORE any disk mutation.
+    behind.  Both helpers receive a ``schema_path`` resolved from the
+    FORGE plugin install (not from the caller-supplied ``repo_root``) so
+    an invalid payload refuses BEFORE any disk mutation and so the seeder
+    works against any target repository, not only the FORGE repo itself.
 
     Order of operations:
 
@@ -146,7 +155,9 @@ def seed_routed_feature(
       3. Compute ``today_iso`` from ``today`` (or ``date.today()`` when
          omitted) and ``feature_id = f"{today_iso}-{slug_from_idea(idea)}"``
          (or ``feature_slug`` when given for suffix-disambig).
-      4. Resolve ``schema_path = repo_root / "schemas/state.schema.json"``.
+      4. Resolve ``schema_path`` from the FORGE plugin install
+         (``_STATE_SCHEMA_PATH``); a missing file here means the plugin
+         install is broken and surfaces a clean :class:`RuntimeError`.
       5. Pre-collision check via :func:`feature_folder_exists` →
          :class:`ArchiveError` on True (no disk mutation yet).
       6. Call :func:`create_feature_folder` with ``current_phase`` (seed
@@ -277,14 +288,17 @@ def seed_routed_feature(
     feature_id = f"{today_iso}-{slug}"
 
     # Step 4: schema path passed to BOTH helpers so payload validation
-    # refuses BEFORE any disk write. Pre-check the schema file exists and
-    # surface a clean RuntimeError naming the missing path so the operator
-    # does not see a raw FileNotFoundError bubble up from inside
-    # write_state.
-    schema_path = repo_root / "schemas" / "state.schema.json"
+    # refuses BEFORE any disk write. The schema lives with the FORGE plugin
+    # install (see ``_STATE_SCHEMA_PATH``), not under the caller-supplied
+    # ``repo_root`` — using the latter would force every target repo to
+    # carry a copy of FORGE's schemas, which they are not contracted to do.
+    # A missing file here means the plugin install itself is broken, so the
+    # error names the plugin path explicitly.
+    schema_path = _STATE_SCHEMA_PATH
     if not schema_path.is_file():
         raise RuntimeError(
-            f"schemas/state.schema.json missing under {repo_root}; verify plugin install path"
+            f"schemas/state.schema.json missing from FORGE plugin install at {schema_path}; "
+            "verify plugin install integrity"
         )
 
     # Step 5: collision check BEFORE seed.  ``create_feature_folder`` would

@@ -43,18 +43,14 @@ TODAY = date(2026, 5, 8)
 
 
 def _stage_repo(tmp_path: Path) -> Path:
-    """Stage a repo_root under tmp_path with the real schema in place.
+    """Stage a repo_root under tmp_path for seeding.
 
-    ``seed_routed_feature`` resolves ``schema_path`` as
-    ``repo_root / "schemas/state.schema.json"`` so we copy the real schema
-    next to the seeded ``.forge/features/`` tree.
+    ``seed_routed_feature`` resolves ``schema_path`` from the FORGE plugin
+    install (``_STATE_SCHEMA_PATH``), not from the caller-supplied
+    ``repo_root``, so the staged ``tmp_path`` need not carry a copy of the
+    schema. ``tmp_path`` is returned unchanged so the seeded
+    ``.forge/features/`` tree lands in an isolated test directory.
     """
-    schema_dir = tmp_path / "schemas"
-    schema_dir.mkdir()
-    (schema_dir / "state.schema.json").write_text(
-        SCHEMA_PATH.read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
     return tmp_path
 
 
@@ -342,16 +338,25 @@ def test_feature_slug_accepted_at_three_char_boundary(tmp_path: Path) -> None:
     assert folder.name == "2026-05-08-abc"
 
 
-def test_seed_routed_feature_missing_schema_raises_runtime_error(tmp_path: Path) -> None:
-    """A missing schemas/state.schema.json must surface a clean RuntimeError
-    naming the missing path, not a raw FileNotFoundError bubbled up from
-    inside write_state.
+def test_seed_routed_feature_missing_schema_raises_runtime_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing plugin-install state.schema.json must surface a clean
+    RuntimeError naming the plugin path, not a raw FileNotFoundError
+    bubbled up from inside write_state.
+
+    The seeder resolves the schema from the FORGE plugin install rather
+    than from ``repo_root``, so we exercise the missing-schema branch by
+    monkeypatching ``_STATE_SCHEMA_PATH`` to a non-existent file under
+    ``tmp_path``.
     """
-    # NOTE: do NOT call _stage_repo — the test exercises the no-schema branch.
-    repo = tmp_path
+    missing = tmp_path / "no-such-plugin-install" / "schemas" / "state.schema.json"
+    monkeypatch.setattr(routing, "_STATE_SCHEMA_PATH", missing)
+
     with pytest.raises(RuntimeError, match=r"schemas/state\.schema\.json missing"):
         seed_routed_feature(
-            repo,
+            tmp_path,
             idea="any idea",
             final_tier="focused",
             today=TODAY,
@@ -710,7 +715,8 @@ def test_seed_routed_feature_schema_path_passed_to_both_helpers(
 ) -> None:
     """Both create_feature_folder and record_routing_decision get schema_path."""
     repo = _stage_repo(tmp_path)
-    expected_schema = repo / "schemas" / "state.schema.json"
+    # Schema resolves from the plugin install, not from ``repo_root``.
+    expected_schema = routing._STATE_SCHEMA_PATH
     captured: dict[str, Path | None] = {}
 
     def _spy_create(repo_root: Path, **kwargs: Any) -> Path:

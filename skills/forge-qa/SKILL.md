@@ -63,17 +63,107 @@ Two entry paths:
    return one `PromiseCheck` per `SpecPromise`. The skill aggregates results
    via `tools.qa.acceptance.run_acceptance` with the subagent wired in as
    the injected `runner`.
+
+   **Required prompt prefix.** The dispatch prompt MUST start with a top-level `context_budget:` block at column 0 (outside any fenced code block). The PreToolUse hook (`hooks/check_budget.py`) refuses dispatches that omit it. Canonical shape — copy verbatim and substitute the bracketed values:
+
+   ```text
+   context_budget:
+   {
+     "spec_sections": ["Intent", "Acceptance Criteria", "Scenarios"],
+     "files_in_scope": [
+       ".forge/features/<id>/SPEC.md"
+     ],
+     "forbidden": [
+       "do not read any implementation file under tools/, hooks/, src/, or schemas/",
+       "do not edit any file",
+       "do not dispatch additional subagents"
+     ],
+     "artifact_descriptor": {
+       "kind": "<cli | library | service | ui | other>",
+       "identifier": "<opaque handle from --artifact-identifier>"
+     },
+     "return_format": {
+       "promise_checks": "list[PromiseCheck per SpecPromise]",
+       "max_words": 600
+     }
+   }
+
+   [task prose follows here, starting with a blank line]
+   ```
+
 5. **Edge Probing section.** Dispatch a SECOND fresh subagent with the same
    budget shape. Task: enumerate normal-user mistakes (mistypes, empty
    input, oversized input, malformed input). Cap at 20 attempts. Each
    attempt becomes a finding row with pass/fail. Aggregate Status:
    `pass` when no failures, `partial` when mostly-pass with ≤2 fails,
    `fail` otherwise.
+
+   **Required prompt prefix.** Reuse the Step 4 canonical shape; swap `return_format` to:
+
+   ```text
+   context_budget:
+   {
+     "spec_sections": ["Intent", "Acceptance Criteria", "Scenarios"],
+     "files_in_scope": [
+       ".forge/features/<id>/SPEC.md"
+     ],
+     "forbidden": [
+       "do not read any implementation file under tools/, hooks/, src/, or schemas/",
+       "do not edit any file",
+       "do not dispatch additional subagents",
+       "do not exceed 20 probe attempts"
+     ],
+     "artifact_descriptor": {
+       "kind": "<cli | library | service | ui | other>",
+       "identifier": "<opaque handle from --artifact-identifier>"
+     },
+     "return_format": {
+       "probe_rows": "list[{attempt: str, status: enum[pass, fail], note: str}]",
+       "max_attempts": 20,
+       "max_words": 600
+     }
+   }
+
+   [task prose follows here, starting with a blank line]
+   ```
+
 6. **Adversarial section.** Dispatch a THIRD fresh subagent (red-team).
    Call `tools.qa.adversarial.run_adversarial` with this subagent as the
    injected runner. Cap policy is the module default — 5-minute walltime,
    50 attempts. When `--no-adversarial` is set, skip the dispatch entirely
    and write the section with `Status: skipped` plus the opt-out reason.
+
+   **Required prompt prefix.** Reuse the Step 4 canonical shape with the red-team `forbidden` + `return_format`:
+
+   ```text
+   context_budget:
+   {
+     "spec_sections": ["Intent", "Acceptance Criteria", "Scenarios", "Negative Requirements"],
+     "files_in_scope": [
+       ".forge/features/<id>/SPEC.md"
+     ],
+     "forbidden": [
+       "do not read any implementation file under tools/, hooks/, src/, or schemas/",
+       "do not edit any file",
+       "do not dispatch additional subagents",
+       "do not exceed the walltime or attempt cap"
+     ],
+     "artifact_descriptor": {
+       "kind": "<cli | library | service | ui | other>",
+       "identifier": "<opaque handle from --artifact-identifier>"
+     },
+     "caps": {
+       "walltime_seconds": 300,
+       "max_attempts": 50
+     },
+     "return_format": {
+       "attack_rows": "list[{attempt: str, status: enum[blocked, escaped], note: str}]",
+       "max_words": 600
+     }
+   }
+
+   [task prose follows here, starting with a blank line]
+   ```
 7. **NR Regrep section.** Call `tools.qa.nr_regrep.run_nr_regrep` (pure
    Python; no subagent). Working-tree mode scans the tree at HEAD;
    merged mode scans the merged tree. Algorithm is identical — only the

@@ -1368,6 +1368,33 @@ def test_feature_folder_exists_coerces_string_repo_root(tmp_path: Path) -> None:
     assert state.feature_folder_exists(str(tmp_path), "2026-05-12-missing") is False
 
 
+def test_read_state_coerces_string_path(tmp_path: Path, schemas_dir: Path) -> None:
+    """A ``str`` ``path`` must read identically to the ``Path`` form.
+
+    Agent callers improvising on the call shape pass a ``str`` state.json
+    path; ``read_state`` calls ``path.exists()`` and ``path.read_text(...)``
+    immediately, both ``Path`` methods that trip a cryptic ``AttributeError``
+    at the first line when no boundary coercion sits at the entry. The
+    string form must return the same parsed payload as the ``Path`` form.
+    """
+    target = tmp_path / "state.json"
+    initial = {
+        "feature_id": "2026-05-12-coerce-read",
+        "tier": "focused",
+        "current_phase": "spec",
+        "phases": {"spec": {"status": "in_progress", "started_at": "2026-05-12T10:00:00Z"}},
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    schema_path = schemas_dir / "state.schema.json"
+    state.write_state(target, initial, schema_path=schema_path)
+
+    result = state.read_state(str(target), schema_path=schema_path)
+
+    assert result == initial
+
+
 def test_record_commit_coerces_string_path(tmp_path: Path, schemas_dir: Path) -> None:
     """A ``str`` ``path`` must append the commit identically to the ``Path`` form.
 

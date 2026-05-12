@@ -409,7 +409,7 @@ def _resolve_schema_path(path: Path, schema_path: _SchemaPathArg) -> Path | None
     return schema_path
 
 
-def read_state(path: Path, schema_path: _SchemaPathArg = None) -> dict[str, Any]:
+def read_state(path: Path | str, schema_path: _SchemaPathArg = None) -> dict[str, Any]:
     """Read, parse, and (optionally) schema-validate a state.json file.
 
     Format-aware: when a schema is in effect, the validator enforces
@@ -417,7 +417,10 @@ def read_state(path: Path, schema_path: _SchemaPathArg = None) -> dict[str, Any]
     ``rfc3339-validator`` extra.
 
     Args:
-        path: Path to the state.json file.
+        path: Path to the state.json file. A ``str`` is accepted at the
+            entry boundary and coerced to ``Path`` so agent callers that
+            improvise on the call shape do not trip a cryptic
+            ``AttributeError`` at the first ``path.exists()`` call.
         schema_path: Three-mode schema selector.
 
             * ``None`` (default) — autodiscover ``schemas/state.schema.json``
@@ -434,6 +437,7 @@ def read_state(path: Path, schema_path: _SchemaPathArg = None) -> dict[str, Any]
     Raises:
         StateError: File missing, invalid JSON, or schema validation fails.
     """
+    path = Path(path)
     if not path.exists():
         raise StateError(f"state.json not found at {path}")
     try:

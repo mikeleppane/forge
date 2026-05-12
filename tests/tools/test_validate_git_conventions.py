@@ -79,13 +79,14 @@ class _ScriptedRunner:
 
 
 def _script_commit(sha: str, message: str) -> dict[tuple[str, ...], Any]:
-    # ``git show`` accepts the ``--`` end-of-options separator and the
-    # production code threads it through. ``git rev-parse --verify`` rejects
-    # ``--`` (it makes the arg a pathspec), so that invocation stays clean
-    # and relies on the SHA-regex check in ``_load_commits``.
+    # ``git show`` is invoked WITHOUT the ``--`` end-of-options separator
+    # because ``git show`` treats every argument after ``--`` as a pathspec
+    # and prints an empty diff instead of the commit body. ``git rev-parse
+    # --verify`` rejects leading-dash positionals natively, so the upstream
+    # gate covers the flag-injection defense.
     return {
         ("git", "rev-parse", "--verify", f"{sha}^{{commit}}"): (0, sha + "\n", ""),
-        ("git", "show", "-s", "--format=%B", "--", sha): (0, message, ""),
+        ("git", "show", "-s", "--format=%B", sha): (0, message, ""),
     }
 
 
@@ -555,7 +556,7 @@ def test_show_failure_after_rev_parse_passes_emits_warn(tmp_path: Path) -> None:
     _write_state(folder, [{"sha": sha, "phase": "spec", "subject": "feat(tools): add"}])
     scripts: dict[tuple[str, ...], Any] = {
         ("git", "rev-parse", "--verify", f"{sha}^{{commit}}"): (0, sha + "\n", ""),
-        ("git", "show", "-s", "--format=%B", "--", sha): (128, "", "fatal: bad object\n"),
+        ("git", "show", "-s", "--format=%B", sha): (128, "", "fatal: bad object\n"),
     }
     findings = validate_git_conventions(folder, runner=_ScriptedRunner(scripts))
     assert len(findings) == 1

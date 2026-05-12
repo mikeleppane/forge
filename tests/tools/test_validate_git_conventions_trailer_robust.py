@@ -69,7 +69,7 @@ class _ScriptedRunner:
 def _script_commit(sha: str, message: str) -> dict[tuple[str, ...], Any]:
     return {
         ("git", "rev-parse", "--verify", f"{sha}^{{commit}}"): (0, sha + "\n", ""),
-        ("git", "show", "-s", "--format=%B", "--", sha): (0, message, ""),
+        ("git", "show", "-s", "--format=%B", sha): (0, message, ""),
     }
 
 

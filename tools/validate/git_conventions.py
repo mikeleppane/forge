@@ -35,10 +35,14 @@ parse-error surface stays owned by :func:`tools.validate.validate_config`.
 SHA hygiene: ``state.commits[].sha`` is constrained to ``^[0-9a-f]{7,40}$``
 by the state schema, but the validator does not require the strict schema
 to have run first. It enforces the same regex itself and rejects malformed
-shas with a BLOCK finding before any subprocess call. Every git invocation
-also threads ``--`` before positional arguments to remove the entire class
-of "future-maintainer chose a git subcommand that mis-parses leading-dash
-positionals" failures.
+shas with a BLOCK finding before any subprocess call. The subprocess gate
+runs ``git rev-parse --verify <sha>^{commit}`` first; rev-parse rejects
+leading-dash positionals natively, so an attacker-supplied SHA that
+slipped the regex would still bounce there before any second invocation.
+``git show`` is therefore called WITHOUT the ``--`` end-of-options
+separator: ``git show`` interprets every argument after ``--`` as a
+pathspec, which made an earlier revision of this module print an empty
+diff for every commit instead of the commit message body.
 """
 
 from __future__ import annotations
@@ -469,19 +473,28 @@ def _fetch_message(
 ) -> str | None:
     """Return the commit message body, or ``None`` if the SHA is unreachable.
 
-    ``git show`` accepts the ``--`` end-of-options separator; ``git rev-parse
-    --verify`` does NOT (the ``--`` makes rev-parse interpret the argument
-    as a pathspec and fail with ``Needed a single revision``). So rev-parse
-    stays without the separator and relies on two upstream guards:
+    Security: SHAs reach this helper only after two upstream guards run.
 
     1. ``_load_commits`` enforces ``^[0-9a-f]{7,40}$`` against every SHA,
        so a state.json-borne ``--upload-pack=evil`` shape never reaches the
        subprocess at all.
-    2. ``rev-parse --verify`` rejects leading-dash positionals natively
-       (it requires a single revision).
+    2. ``git rev-parse --verify <sha>^{commit}`` is invoked below and
+       rejects any argument starting with ``-`` natively (it requires a
+       single revision and bails on leading-dash positionals). A
+       non-existent or otherwise unreachable SHA exits non-zero and
+       short-circuits before the ``git show`` invocation runs.
 
-    ``git show`` accepts ``--``, so we keep it there as defense-in-depth
-    against any future refactor that swaps the subcommand.
+    The ``git show`` invocation deliberately OMITS the ``--`` end-of-options
+    separator. ``git show`` treats every argument AFTER ``--`` as a
+    pathspec, so an earlier revision of this helper that passed
+    ``["git", "show", "-s", "--format=%B", "--", sha]`` made git print the
+    (empty) diff for the pathspec named after the SHA instead of the
+    commit body, producing a silent empty string for every reachable
+    commit and a false-negative on every trailer-ban check. The two
+    upstream guards above make the ``--`` separator redundant for
+    flag-injection defense, so removing it is safe and restores the
+    documented behavior (read the commit body via the ``%B`` format
+    placeholder).
     """
     try:
         verify = runner(
@@ -495,7 +508,7 @@ def _fetch_message(
         return None
     try:
         show = runner(
-            ["git", "show", "-s", "--format=%B", "--", sha],
+            ["git", "show", "-s", "--format=%B", sha],
             cwd=cwd,
             timeout=_DEFAULT_TIMEOUT,
         )

@@ -609,12 +609,13 @@ def _script_commit(sha: str, message: str) -> dict[tuple[str, ...], tuple[int, s
     """Return the scripted (verify, show) pair for one fake commit.
 
     Mirrors ``_script_commit`` in ``test_validate_git_conventions`` —
-    ``rev-parse --verify`` excludes ``--``; ``show`` includes it because the
-    production code threads the separator through that call.
+    ``rev-parse --verify`` excludes ``--`` (it requires a single revision)
+    and ``show`` also excludes ``--`` (it would otherwise treat the SHA as
+    a pathspec and print an empty diff instead of the commit body).
     """
     return {
         ("git", "rev-parse", "--verify", f"{sha}^{{commit}}"): (0, sha + "\n", ""),
-        ("git", "show", "-s", "--format=%B", "--", sha): (0, message, ""),
+        ("git", "show", "-s", "--format=%B", sha): (0, message, ""),
     }
 
 

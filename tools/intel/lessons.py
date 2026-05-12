@@ -646,13 +646,21 @@ def _lessons_path(repo_root: Path) -> Path:
     return repo_root / ".forge" / "intel" / "lessons.md"
 
 
-def next_id(repo_root: Path) -> str:
+def next_id(repo_root: Path | str) -> str:
     """Return the next free ``L<NNN>`` slot for the lessons file.
 
     Missing file -> ``L001``. Malformed file -> :class:`LessonError`
     (the allocator refuses to skip over a broken file; the caller fixes it
     first).
+
+    Args:
+        repo_root: Repository root containing the ``.forge/`` tree. A
+            ``str`` is accepted at the entry boundary and coerced to
+            ``Path`` so agent callers that improvise on the call shape
+            do not trip a cryptic ``TypeError`` on the first ``/``
+            operator inside ``_lessons_path``.
     """
+    repo_root = Path(repo_root)
     path = _lessons_path(repo_root)
     lessons = parse(path)
     if not lessons:

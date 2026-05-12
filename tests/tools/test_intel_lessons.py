@@ -410,6 +410,17 @@ def test_next_id_missing_file_returns_l001(tmp_path: Path) -> None:
     assert lessons.next_id(tmp_path) == "L001"
 
 
+def test_next_id_coerces_string_repo_root(tmp_path: Path) -> None:
+    """Boundary coercion: a string repo_root must not trip ``TypeError``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers that pass a string for an annotated ``Path`` parameter must
+    not crash four frames deep on ``str / ".forge" / ...``; instead the
+    documented L001 missing-file branch should fire.
+    """
+    assert lessons.next_id(str(tmp_path)) == "L001"
+
+
 def test_next_id_one_entry_returns_l002(tmp_path: Path) -> None:
     body = _file(_entry(nid="L001"))
     _write(tmp_path / ".forge" / "intel" / "lessons.md", body)

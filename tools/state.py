@@ -6,14 +6,22 @@ import contextlib
 import json
 import os
 import re
+import sys
 import tempfile
-from collections.abc import Callable, Mapping
+import threading
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
 import jsonschema
+
+if sys.platform != "win32":
+    import fcntl
+else:  # pragma: no cover - platform-conditional
+    fcntl = None  # type: ignore[assignment]
 
 from tools._repo_root import discover_repo_root
 from tools.validate._finding import Finding
@@ -25,6 +33,84 @@ from tools.validate.tdd_evidence import validate_tdd_evidence
 
 class StateError(RuntimeError):
     """Raised when state.json cannot be read, parsed, or transitioned."""
+
+
+class LockingNotSupportedError(StateError):
+    """Raised when ``state_lock`` cannot acquire on the current platform.
+
+    Native Win32 is the documented case: ``fcntl`` is POSIX-only and the
+    locking contract refuses to silently no-op. WSL is the supported
+    workaround.
+    """
+
+
+# Thread-local set of state.json paths currently held by this process.
+# ``state_lock`` is non-re-entrant: a nested acquisition against any path
+# already in this set raises ``RuntimeError``. Per-thread storage avoids
+# false re-entrancy collisions across genuinely independent worker threads.
+_held_state_locks: Final[threading.local] = threading.local()
+
+
+def _held_lock_paths() -> set[str]:
+    """Return the per-thread set of currently-held state-lock paths."""
+    holdings = getattr(_held_state_locks, "paths", None)
+    if holdings is None:
+        holdings = set()
+        _held_state_locks.paths = holdings
+    return holdings
+
+
+@contextmanager
+def state_lock(state_path: Path) -> Generator[None]:
+    """Hold an exclusive advisory lock on ``<state_path>.lock`` for the body.
+
+    Serializes read-modify-write helpers in this module so concurrent
+    callers cannot overwrite each other's audit entries. Mirrors the
+    ``fcntl.LOCK_EX`` pattern used in ``tools.intel.lessons.append``.
+
+    Non-re-entrant: nested acquisition in the same thread raises
+    ``RuntimeError``. Native Win32 raises
+    :class:`LockingNotSupportedError`.
+
+    Args:
+        state_path: state.json path being mutated. The sidecar lockfile
+            is created at ``<state_path>.lock``.
+
+    Yields:
+        ``None`` once the lock is held.
+
+    Raises:
+        LockingNotSupportedError: native Win32 (``sys.platform == "win32"``).
+        RuntimeError: nested acquisition in the same thread.
+        OSError: lockfile cannot be created or flock syscall failed.
+    """
+    if sys.platform == "win32":
+        raise LockingNotSupportedError(
+            "tools.state.state_lock is not supported on native Win32; "
+            "use WSL on Windows hosts (msvcrt.locking is intentionally not wired)."
+        )
+
+    key = str(state_path.resolve()) if state_path.exists() else str(state_path)
+    holdings = _held_lock_paths()
+    if key in holdings:
+        raise RuntimeError(
+            f"state_lock is non-re-entrant; already held for {key!r} "
+            "in this thread. Acquire once at the outermost mutation site."
+        )
+
+    lock_path = state_path.with_name(state_path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fh = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115, PTH123
+    try:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        holdings.add(key)
+        try:
+            yield
+        finally:
+            holdings.discard(key)
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_fh.close()
 
 
 class _NoValidate:
@@ -385,7 +471,7 @@ def write_state(
             messages = "; ".join(e.message for e in errors)
             raise StateError(f"refusing to write: payload fails schema: {messages}")
 
-    path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    _atomic_write_json(path, payload)
 
 
 # Severity sets blocked by each phase's exit gate. ``HIGH`` is included for
@@ -644,46 +730,49 @@ def complete_phase(
     if phase not in VALID_LIFECYCLE_PHASES:
         raise StateError(f"unknown phase '{phase}'; must be one of {VALID_LIFECYCLE_PHASES}")
 
-    payload = read_state(path, schema_path=schema_path)
-    timestamp = now or _utc_now_iso()
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        timestamp = now or _utc_now_iso()
 
-    if "phases" not in payload or not isinstance(payload["phases"], dict):
-        raise StateError("state.json is missing the required `phases` mapping")
-    if phase not in payload["phases"]:
-        raise StateError(f"cannot complete phase '{phase}': not present in phases")
-    if payload.get("current_phase") != phase:
-        raise StateError(
-            f"cannot complete phase '{phase}': current_phase is '{payload.get('current_phase')}'"
-        )
-    current_status = payload["phases"][phase].get("status")
-    if current_status != "in_progress":
-        raise StateError(
-            f"cannot complete phase '{phase}': status is '{current_status}', expected 'in_progress'"
-        )
-
-    if phase == "review":
-        targets_done = sorted(payload["phases"][phase].get("targets_done", []))
-        required = sorted(VALID_REVIEW_TARGETS)
-        if targets_done != required:
+        if "phases" not in payload or not isinstance(payload["phases"], dict):
+            raise StateError("state.json is missing the required `phases` mapping")
+        if phase not in payload["phases"]:
+            raise StateError(f"cannot complete phase '{phase}': not present in phases")
+        if payload.get("current_phase") != phase:
             raise StateError(
-                f"cannot complete phase 'review': both review targets must be done; "
-                f"targets_done={targets_done}, required={required}"
+                f"cannot complete phase '{phase}': "
+                f"current_phase is '{payload.get('current_phase')}'"
+            )
+        current_status = payload["phases"][phase].get("status")
+        if current_status != "in_progress":
+            raise StateError(
+                f"cannot complete phase '{phase}': "
+                f"status is '{current_status}', expected 'in_progress'"
             )
 
-    _enforce_phase_gate(path, phase)
+        if phase == "review":
+            targets_done = sorted(payload["phases"][phase].get("targets_done", []))
+            required = sorted(VALID_REVIEW_TARGETS)
+            if targets_done != required:
+                raise StateError(
+                    f"cannot complete phase 'review': both review targets must be done; "
+                    f"targets_done={targets_done}, required={required}"
+                )
 
-    payload["phases"][phase]["status"] = "done"
-    payload["phases"][phase]["completed_at"] = timestamp
+        _enforce_phase_gate(path, phase)
 
-    # Anchor for post-merge /forge:qa: stamp top-level ``shipped_at`` exactly
-    # once on ship completion. If a prior completion already wrote the field
-    # (e.g. an artificial fixture or replay) preserve the original timestamp
-    # so the post-merge guard reads a stable point-in-time value.
-    if phase == "ship" and "shipped_at" not in payload:
-        payload["shipped_at"] = timestamp
+        payload["phases"][phase]["status"] = "done"
+        payload["phases"][phase]["completed_at"] = timestamp
 
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+        # Anchor for post-merge /forge:qa: stamp top-level ``shipped_at`` exactly
+        # once on ship completion. If a prior completion already wrote the field
+        # (e.g. an artificial fixture or replay) preserve the original timestamp
+        # so the post-merge guard reads a stable point-in-time value.
+        if phase == "ship" and "shipped_at" not in payload:
+            payload["shipped_at"] = timestamp
+
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def _tier_allowed_phases(tier: str) -> frozenset[str]:
@@ -743,33 +832,34 @@ def start_phase(
     if phase not in VALID_LIFECYCLE_PHASES:
         raise StateError(f"unknown phase '{phase}'; must be one of {VALID_LIFECYCLE_PHASES}")
 
-    payload = read_state(path, schema_path=schema_path)
-    timestamp = now or _utc_now_iso()
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        timestamp = now or _utc_now_iso()
 
-    # M6 M5: cross-check phase against seeded tier so a focused/standard
-    # feature cannot end up on a refine/domain slot (where the next-phase
-    # pump returns None and the lifecycle gets stuck).
-    tier = payload.get("tier")
-    if isinstance(tier, str):
-        allowed = _tier_allowed_phases(tier)
-        if phase not in allowed:
-            raise StateError(f"phase {phase!r} not allowed on tier {tier!r}")
+        # Cross-check phase against seeded tier so a focused/standard feature
+        # cannot end up on a refine/domain slot (where the next-phase pump
+        # returns None and the lifecycle gets stuck).
+        tier = payload.get("tier")
+        if isinstance(tier, str):
+            allowed = _tier_allowed_phases(tier)
+            if phase not in allowed:
+                raise StateError(f"phase {phase!r} not allowed on tier {tier!r}")
 
-    if "phases" not in payload or not isinstance(payload["phases"], dict):
-        raise StateError("state.json is missing the required `phases` mapping")
+        if "phases" not in payload or not isinstance(payload["phases"], dict):
+            raise StateError("state.json is missing the required `phases` mapping")
 
-    new_block: dict[str, Any] = {"status": "in_progress", "started_at": timestamp}
-    if phase == "review":
-        prior = payload["phases"].get("review")
-        if isinstance(prior, dict):
-            for carry in ("targets_done", "current_target"):
-                if carry in prior:
-                    new_block[carry] = prior[carry]
-    payload["phases"][phase] = new_block
-    payload["current_phase"] = phase
+        new_block: dict[str, Any] = {"status": "in_progress", "started_at": timestamp}
+        if phase == "review":
+            prior = payload["phases"].get("review")
+            if isinstance(prior, dict):
+                for carry in ("targets_done", "current_target"):
+                    if carry in prior:
+                        new_block[carry] = prior[carry]
+        payload["phases"][phase] = new_block
+        payload["current_phase"] = phase
 
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def finish_feature(
@@ -787,10 +877,11 @@ def finish_feature(
     Returns:
         Updated state payload.
     """
-    payload = read_state(path, schema_path=schema_path)
-    payload["current_phase"] = "done"
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        payload["current_phase"] = "done"
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def record_routing_decision(
@@ -832,33 +923,35 @@ def record_routing_decision(
         raise StateError(f"invalid final_tier {final_tier!r}; must be one of {VALID_TIERS}")
     if proposed_tier is not None and proposed_tier not in VALID_TIERS:
         raise StateError(f"invalid proposed_tier {proposed_tier!r}; must be one of {VALID_TIERS}")
-    payload = read_state(path, schema_path=schema_path)
-    # Cross-check: final_tier must match the seeded state.json.tier so a
-    # focused/standard feature cannot quietly end up with routing.final_tier
-    # set to "full" (which would corrupt downstream phase-pump tables and
-    # next_phase_command resolution). seed_routed_feature already passes
-    # final_tier == state.tier on the happy path, so this guard never trips
-    # the canonical seeded route — only mismatched re-calls.
-    state_tier = payload.get("tier")
-    if final_tier != state_tier:
-        raise StateError(f"final_tier {final_tier!r} mismatches state.json.tier {state_tier!r}")
-    block: dict[str, Any] = {
-        "idea": idea,
-        "final_tier": final_tier,
-        "decided_at": now or _utc_now_iso(),
-        "constitution_present": constitution_present,
-    }
-    if proposed_tier is not None:
-        block["proposed_tier"] = proposed_tier
-    if rationale is not None:
-        block["rationale"] = rationale
-    if phase_list is not None:
-        # Defensive copy so caller mutations after the call do not leak into
-        # the persisted block. Schema enforces uniqueItems + enum membership.
-        block["phase_list"] = list(phase_list)
-    payload["routing"] = block
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        # Cross-check: final_tier must match the seeded state.json.tier so a
+        # focused/standard feature cannot quietly end up with routing.final_tier
+        # set to "full" (which would corrupt downstream phase-pump tables and
+        # next_phase_command resolution). seed_routed_feature already passes
+        # final_tier == state.tier on the happy path, so this guard never trips
+        # the canonical seeded route — only mismatched re-calls.
+        state_tier = payload.get("tier")
+        if final_tier != state_tier:
+            raise StateError(f"final_tier {final_tier!r} mismatches state.json.tier {state_tier!r}")
+        block: dict[str, Any] = {
+            "idea": idea,
+            "final_tier": final_tier,
+            "decided_at": now or _utc_now_iso(),
+            "constitution_present": constitution_present,
+        }
+        if proposed_tier is not None:
+            block["proposed_tier"] = proposed_tier
+        if rationale is not None:
+            block["rationale"] = rationale
+        if phase_list is not None:
+            # Defensive copy so caller mutations after the call do not leak into
+            # the persisted block. Schema enforces uniqueItems + enum membership.
+            block["phase_list"] = list(phase_list)
+        payload["routing"] = block
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def record_refined_idea(
@@ -888,15 +981,17 @@ def record_refined_idea(
             f"refined_idea exceeds {_REFINED_IDEA_MAX_CHARS}-char cap "
             f"(got {len(refined)} chars); trim before persistence"
         )
-    payload = read_state(path, schema_path=schema_path)
-    current_phase = payload.get("current_phase")
-    if current_phase != "refine":
-        raise StateError(
-            f"cannot record refined_idea: current_phase is {current_phase!r}, expected 'refine'"
-        )
-    payload["refined_idea"] = refined
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        current_phase = payload.get("current_phase")
+        if current_phase != "refine":
+            raise StateError(
+                f"cannot record refined_idea: current_phase is {current_phase!r}, expected 'refine'"
+            )
+        payload["refined_idea"] = refined
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def guard_refine_entry(path: Path, schema_path: Path | None = None) -> dict[str, Any]:
@@ -978,47 +1073,48 @@ def increment_refine_attempts(
             integer, the count already sits at the ``_REFINE_ATTEMPTS_CAP``
             cap, or schema validation fails.
     """
-    payload = read_state(path, schema_path=schema_path)
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
 
-    current_phase = payload.get("current_phase")
-    if current_phase != "refine":
-        raise StateError(
-            f"cannot increment refine_attempts: current_phase is "
-            f"{current_phase!r}, expected 'refine'"
-        )
+        current_phase = payload.get("current_phase")
+        if current_phase != "refine":
+            raise StateError(
+                f"cannot increment refine_attempts: current_phase is "
+                f"{current_phase!r}, expected 'refine'"
+            )
 
-    require_full_tier(payload, phase="refine")
+        require_full_tier(payload, phase="refine")
 
-    routing = payload.get("routing")
-    if not isinstance(routing, dict):
-        raise StateError(
-            "cannot increment refine_attempts: routing block missing — "
-            "/forge:do must run before /forge:refine"
-        )
+        routing = payload.get("routing")
+        if not isinstance(routing, dict):
+            raise StateError(
+                "cannot increment refine_attempts: routing block missing — "
+                "/forge:do must run before /forge:refine"
+            )
 
-    raw_current: Any = routing.get("refine_attempts", 0)
-    if not isinstance(raw_current, int) or isinstance(raw_current, bool):
-        raise StateError(
-            f"cannot increment refine_attempts: routing.refine_attempts "
-            f"must be int, got {type(raw_current).__name__} "
-            f"({raw_current!r}) in {path}"
-        )
-    current: int = raw_current
-    if current < 0:
-        raise StateError(
-            f"cannot increment refine_attempts: routing.refine_attempts "
-            f"is negative ({current}) in {path}"
-        )
-    if current >= _REFINE_ATTEMPTS_CAP:
-        raise StateError(
-            f"refine_attempts already at cap ({_REFINE_ATTEMPTS_CAP}); "
-            f"record_refined_idea + complete_phase or surface a deviation"
-        )
-    new_count = current + 1
-    routing["refine_attempts"] = new_count
+        raw_current: Any = routing.get("refine_attempts", 0)
+        if not isinstance(raw_current, int) or isinstance(raw_current, bool):
+            raise StateError(
+                f"cannot increment refine_attempts: routing.refine_attempts "
+                f"must be int, got {type(raw_current).__name__} "
+                f"({raw_current!r}) in {path}"
+            )
+        current: int = raw_current
+        if current < 0:
+            raise StateError(
+                f"cannot increment refine_attempts: routing.refine_attempts "
+                f"is negative ({current}) in {path}"
+            )
+        if current >= _REFINE_ATTEMPTS_CAP:
+            raise StateError(
+                f"refine_attempts already at cap ({_REFINE_ATTEMPTS_CAP}); "
+                f"record_refined_idea + complete_phase or surface a deviation"
+            )
+        new_count = current + 1
+        routing["refine_attempts"] = new_count
 
-    write_state(path, payload, schema_path=schema_path)
-    return new_count
+        write_state(path, payload, schema_path=schema_path)
+        return new_count
 
 
 def set_review_target(
@@ -1044,19 +1140,21 @@ def set_review_target(
         raise StateError(
             f"invalid review_target {review_target!r}; must be one of {VALID_REVIEW_TARGETS}"
         )
-    payload = read_state(path, schema_path=schema_path)
-    review_block = payload.get("phases", {}).get("review")
-    if review_block is None:
-        raise StateError("cannot set review_target: phases.review entry missing")
-    review_status = review_block.get("status")
-    if review_status != "in_progress":
-        raise StateError(
-            f"cannot set review_target: review status is {review_status!r}, expected 'in_progress'"
-        )
-    review_block["current_target"] = review_target
-    review_block.setdefault("targets_done", [])
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        review_block = payload.get("phases", {}).get("review")
+        if review_block is None:
+            raise StateError("cannot set review_target: phases.review entry missing")
+        review_status = review_block.get("status")
+        if review_status != "in_progress":
+            raise StateError(
+                f"cannot set review_target: review status is "
+                f"{review_status!r}, expected 'in_progress'"
+            )
+        review_block["current_target"] = review_target
+        review_block.setdefault("targets_done", [])
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def complete_review_target(
@@ -1083,26 +1181,27 @@ def complete_review_target(
         raise StateError(
             f"invalid review_target {review_target!r}; must be one of {VALID_REVIEW_TARGETS}"
         )
-    payload = read_state(path, schema_path=schema_path)
-    review_block = payload.get("phases", {}).get("review")
-    if review_block is None:
-        raise StateError("cannot complete review_target: phases.review entry missing")
-    review_status = review_block.get("status")
-    if review_status != "in_progress":
-        raise StateError(
-            f"cannot complete review_target: review status is {review_status!r}, "
-            f"expected 'in_progress'"
-        )
-    current = review_block.get("current_target")
-    if current != review_target:
-        raise StateError(
-            f"cannot complete review_target {review_target!r}: current_target is {current!r}"
-        )
-    targets_done = review_block.setdefault("targets_done", [])
-    if review_target not in targets_done:
-        targets_done.append(review_target)
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        review_block = payload.get("phases", {}).get("review")
+        if review_block is None:
+            raise StateError("cannot complete review_target: phases.review entry missing")
+        review_status = review_block.get("status")
+        if review_status != "in_progress":
+            raise StateError(
+                f"cannot complete review_target: review status is {review_status!r}, "
+                f"expected 'in_progress'"
+            )
+        current = review_block.get("current_target")
+        if current != review_target:
+            raise StateError(
+                f"cannot complete review_target {review_target!r}: current_target is {current!r}"
+            )
+        targets_done = review_block.setdefault("targets_done", [])
+        if review_target not in targets_done:
+            targets_done.append(review_target)
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def set_execute_current_slice(
@@ -1139,28 +1238,31 @@ def set_execute_current_slice(
             f"slice_number must be a positive int (got {type(slice_number).__name__} "
             f"{slice_number!r})"
         )
-    payload = read_state(path, schema_path=schema_path)
-    current_phase = payload.get("current_phase")
-    if current_phase != "execute":
-        raise StateError(
-            f"cannot set execute.current_slice: current_phase is "
-            f"{current_phase!r}, expected 'execute'"
-        )
-    phases = payload.get("phases")
-    if not isinstance(phases, dict) or "execute" not in phases:
-        raise StateError("cannot set execute.current_slice: phases.execute entry missing")
-    execute_block = phases["execute"]
-    if not isinstance(execute_block, dict):
-        raise StateError("cannot set execute.current_slice: phases.execute entry is not a mapping")
-    status = execute_block.get("status")
-    if status != "in_progress":
-        raise StateError(
-            f"cannot set execute.current_slice: phases.execute.status is "
-            f"{status!r}, expected 'in_progress'"
-        )
-    execute_block["current_slice"] = slice_number
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        current_phase = payload.get("current_phase")
+        if current_phase != "execute":
+            raise StateError(
+                f"cannot set execute.current_slice: current_phase is "
+                f"{current_phase!r}, expected 'execute'"
+            )
+        phases = payload.get("phases")
+        if not isinstance(phases, dict) or "execute" not in phases:
+            raise StateError("cannot set execute.current_slice: phases.execute entry missing")
+        execute_block = phases["execute"]
+        if not isinstance(execute_block, dict):
+            raise StateError(
+                "cannot set execute.current_slice: phases.execute entry is not a mapping"
+            )
+        status = execute_block.get("status")
+        if status != "in_progress":
+            raise StateError(
+                f"cannot set execute.current_slice: phases.execute.status is "
+                f"{status!r}, expected 'in_progress'"
+            )
+        execute_block["current_slice"] = slice_number
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def record_commit(
@@ -1176,8 +1278,13 @@ def record_commit(
 
     Replaces ad-hoc Edit / Write calls against the live ``state.json`` —
     the state-writer hook refuses those, and bypassing it through Bash
-    skips schema validation. This helper stamps the entry, validates it,
-    and writes through the same atomic path as every other mutation.
+    skips schema validation. The mutation is serialized via
+    :func:`state_lock` (advisory ``fcntl.LOCK_EX`` on a sidecar lockfile)
+    so concurrent callers cannot overwrite each other's audit entries,
+    and the resulting payload is persisted atomically via
+    :func:`_atomic_write_json` (tempfile + ``fsync`` + ``os.replace`` +
+    parent-directory ``fsync``) so a crash mid-write cannot leave a torn
+    file behind.
 
     Args:
         path: state.json path.
@@ -1195,6 +1302,7 @@ def record_commit(
             is not in :data:`VALID_LIFECYCLE_PHASES`, ``subject`` is empty
             or not a string, ``state.commits`` is not a list, or schema
             validation fails.
+        LockingNotSupportedError: caller is on native Win32.
     """
     if not isinstance(sha, str) or not _COMMIT_SHA_RE.fullmatch(sha):
         raise StateError(f"invalid commit sha {sha!r}; must be 7-40 lowercase hex chars")
@@ -1202,19 +1310,21 @@ def record_commit(
         raise StateError(f"invalid commit phase {phase!r}; must be one of {VALID_LIFECYCLE_PHASES}")
     if not isinstance(subject, str) or not subject:
         raise StateError("commit subject must be a non-empty string")
-    payload = read_state(path, schema_path=schema_path)
-    commits = payload.setdefault("commits", [])
-    if not isinstance(commits, list):
-        raise StateError("state.json `commits` field is not a list")
-    entry: dict[str, Any] = {
-        "sha": sha,
-        "phase": phase,
-        "subject": subject,
-        "logged_at": logged_at or _utc_now_iso(),
-    }
-    commits.append(entry)
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        commits = payload.setdefault("commits", [])
+        if not isinstance(commits, list):
+            raise StateError("state.json `commits` field is not a list")
+        entry: dict[str, Any] = {
+            "sha": sha,
+            "phase": phase,
+            "subject": subject,
+            "logged_at": logged_at or _utc_now_iso(),
+        }
+        commits.append(entry)
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def append_deviation(
@@ -1258,19 +1368,21 @@ def append_deviation(
         raise StateError("deviation cause must be a non-empty string")
     if not isinstance(resolution, str) or not resolution:
         raise StateError("deviation resolution must be a non-empty string")
-    payload = read_state(path, schema_path=schema_path)
-    deviations = payload.setdefault("deviations", [])
-    if not isinstance(deviations, list):
-        raise StateError("state.json `deviations` field is not a list")
-    entry: dict[str, Any] = {
-        "phase": phase,
-        "cause": cause,
-        "resolution": resolution,
-        "logged_at": logged_at or _utc_now_iso(),
-    }
-    deviations.append(entry)
-    write_state(path, payload, schema_path=schema_path)
-    return payload
+
+    with state_lock(path):
+        payload = read_state(path, schema_path=schema_path)
+        deviations = payload.setdefault("deviations", [])
+        if not isinstance(deviations, list):
+            raise StateError("state.json `deviations` field is not a list")
+        entry: dict[str, Any] = {
+            "phase": phase,
+            "cause": cause,
+            "resolution": resolution,
+            "logged_at": logged_at or _utc_now_iso(),
+        }
+        deviations.append(entry)
+        write_state(path, payload, schema_path=schema_path)
+        return payload
 
 
 def feature_folder_exists(repo_root: Path, feature_id: str) -> bool:
@@ -1279,12 +1391,21 @@ def feature_folder_exists(repo_root: Path, feature_id: str) -> bool:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    """Write ``payload`` to ``path`` via tempfile + ``os.replace``.
+    """Write ``payload`` to ``path`` durably and atomically.
 
-    The intermediate file is created in the same directory as ``path`` so
-    ``os.replace`` is a same-filesystem rename (atomic on POSIX). On any
-    failure mid-write the partial tempfile is cleaned up so the caller
-    never sees a torn file.
+    Implementation:
+
+      1. Open a tempfile in the same directory as ``path`` so ``os.replace``
+         is a same-filesystem rename (atomic on POSIX).
+      2. Write the serialized payload, flush, and ``os.fsync`` the file
+         descriptor so the bytes hit the platter / SSD cell.
+      3. ``os.replace`` the tempfile over ``path`` (atomic rename).
+      4. ``os.fsync`` the parent directory so the rename itself is durable
+         across a power loss.
+
+    On any failure between steps 1 and 4, the partial tempfile is unlinked
+    before the original exception re-raises. The caller observes either the
+    pre-call contents of ``path`` or the new payload — never a torn file.
     """
     parent = path.parent
     parent.mkdir(parents=True, exist_ok=True)
@@ -1293,11 +1414,31 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, indent=2, sort_keys=False) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
         tmp_path.replace(path)
-    except Exception:
+        _fsync_directory(parent)
+    except BaseException:
         with contextlib.suppress(FileNotFoundError):
             tmp_path.unlink()
         raise
+
+
+def _fsync_directory(directory: Path) -> None:
+    """``fsync`` a directory inode so a preceding rename is durable.
+
+    Best-effort: platforms that refuse to open a directory for fsync
+    (rare; Windows is the documented case) swallow the error rather than
+    fail the surrounding write.
+    """
+    try:
+        dir_fd = os.open(str(directory), os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def migrate_to_v3(
@@ -1334,35 +1475,37 @@ def migrate_to_v3(
     if schema_path is None:
         schema_path = _STATE_SCHEMA_PATH
     state_path = repo_root / ".forge" / "features" / feature_id / "state.json"
-    payload = read_state(state_path, schema_path=schema_path)
 
-    if payload.get("flow_version") == _FLOW_VERSION_V3:
+    with state_lock(state_path):
+        payload = read_state(state_path, schema_path=schema_path)
+
+        if payload.get("flow_version") == _FLOW_VERSION_V3:
+            return payload
+
+        shipped_at = payload.get("shipped_at")
+        ship_block = payload.get("phases", {}).get("ship", {})
+        ship_done = isinstance(ship_block, dict) and ship_block.get("status") == "done"
+        if not shipped_at and not ship_done:
+            raise StateError(
+                f"cannot migrate to v3 before ship completes: "
+                f"feature {feature_id!r} has neither shipped_at nor phases.ship.status=='done'"
+            )
+
+        payload["flow_version"] = _FLOW_VERSION_V3
+        phases = payload.setdefault("phases", {})
+        if "qa" not in phases:
+            phases["qa"] = {"status": "pending"}
+
+        # Validate post-mutation against the schema before touching disk.
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        validator = _validator_for(schema)
+        errors = sorted(validator.iter_errors(payload), key=lambda e: list(e.path))
+        if errors:
+            messages = "; ".join(e.message for e in errors)
+            raise StateError(f"refusing to migrate: payload fails schema: {messages}")
+
+        _atomic_write_json(state_path, payload)
         return payload
-
-    shipped_at = payload.get("shipped_at")
-    ship_block = payload.get("phases", {}).get("ship", {})
-    ship_done = isinstance(ship_block, dict) and ship_block.get("status") == "done"
-    if not shipped_at and not ship_done:
-        raise StateError(
-            f"cannot migrate to v3 before ship completes: "
-            f"feature {feature_id!r} has neither shipped_at nor phases.ship.status=='done'"
-        )
-
-    payload["flow_version"] = _FLOW_VERSION_V3
-    phases = payload.setdefault("phases", {})
-    if "qa" not in phases:
-        phases["qa"] = {"status": "pending"}
-
-    # Validate post-mutation against the schema before touching disk.
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    validator = _validator_for(schema)
-    errors = sorted(validator.iter_errors(payload), key=lambda e: list(e.path))
-    if errors:
-        messages = "; ".join(e.message for e in errors)
-        raise StateError(f"refusing to migrate: payload fails schema: {messages}")
-
-    _atomic_write_json(state_path, payload)
-    return payload
 
 
 def find_active_feature(

@@ -1035,7 +1035,7 @@ def _skipped_phase_set(payload: dict[str, Any]) -> frozenset[str]:
 
 
 def finish_feature(
-    path: Path,
+    path: Path | str,
     schema_path: Path | None = None,
 ) -> dict[str, Any]:
     """Mark the feature finished by setting current_phase = 'done'.
@@ -1043,12 +1043,16 @@ def finish_feature(
     Does not add a 'done' entry under `phases` (schema's propertyNames forbids it).
 
     Args:
-        path: state.json path.
+        path: state.json path. A ``str`` is accepted at the entry boundary
+            and coerced to ``Path`` so agent callers that improvise on the
+            call shape do not trip a cryptic ``AttributeError`` deep inside
+            the lock-acquisition chain.
         schema_path: Optional schema for read+write validation.
 
     Returns:
         Updated state payload.
     """
+    path = Path(path)
     with state_lock(path):
         payload = read_state(path, schema_path=schema_path)
         payload["current_phase"] = "done"

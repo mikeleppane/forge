@@ -844,6 +844,188 @@ def test_complete_phase_allows_scenarios_exit_when_mapping_is_clean(
     assert result["phases"]["scenarios"]["completed_at"] == "2026-05-12T12:00:00Z"
 
 
+def _seed_feature_with_plan_in_progress(
+    repo_root: Path,
+    schemas_dir: Path,
+    *,
+    feature_id: str,
+    spec_body: str,
+    plan_body: str,
+) -> Path:
+    """Build a tmp ``.forge/features/<id>/`` carrying state.json + SPEC.md +
+    PLAN.md with ``current_phase=plan`` / ``status=in_progress``."""
+    feature = repo_root / ".forge" / "features" / feature_id
+    feature.mkdir(parents=True)
+    initial = {
+        "feature_id": feature_id,
+        "tier": "standard",
+        "current_phase": "plan",
+        "phases": {
+            "spec": {"status": "done"},
+            "scenarios": {"status": "done"},
+            "plan": {
+                "status": "in_progress",
+                "started_at": "2026-05-12T10:00:00Z",
+            },
+        },
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    target = feature / "state.json"
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+    (feature / "SPEC.md").write_text(spec_body, encoding="utf-8")
+    (feature / "PLAN.md").write_text(plan_body, encoding="utf-8")
+    return target
+
+
+def test_complete_phase_refuses_plan_exit_with_high_plan_task_findings(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """Completing the ``plan`` phase must run ``validate_plan_tasks``
+    against PLAN.md (paired with SPEC.md) and refuse the transition when
+    any finding has severity ``HIGH`` or ``BLOCK``. The mechanical gate
+    replaces the prose-only enforcement in the forge-plan skill — a
+    plan with an unblocked AC must not be able to exit plan via
+    ``complete_phase``."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = _seed_feature_with_plan_in_progress(
+        repo,
+        schemas_dir,
+        feature_id="2026-05-12-plan-bad",
+        spec_body=("# Acceptance Criteria\n1. crit-1 done\n"),
+        # PLAN has a slice that does not unblock crit-1 (`validate_plan_tasks`
+        # emits HIGH "AC 1 unblocked by zero slices").
+        plan_body=(
+            "# Slice 1: setup\n**Files in scope:** `src/foo.py`\n**Acceptance:** unrelated text\n"
+        ),
+    )
+
+    on_disk_before = target.read_text(encoding="utf-8")
+
+    with pytest.raises(state.StateError, match=r"HIGH|BLOCK") as exc:
+        state.complete_phase(
+            target,
+            phase="plan",
+            schema_path=schemas_dir / "state.schema.json",
+        )
+
+    assert "PLAN.md" in str(exc.value)
+    assert target.read_text(encoding="utf-8") == on_disk_before, (
+        "state.json must not be mutated when the plan gate refuses"
+    )
+
+
+def test_complete_phase_refuses_plan_exit_with_high_verified_deps_findings(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """A Verified Dependencies row missing required cells must also refuse
+    the plan exit. The mechanical gate runs BOTH ``validate_plan_tasks``
+    and ``validate_verified_deps``; either firing is enough to block."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = _seed_feature_with_plan_in_progress(
+        repo,
+        schemas_dir,
+        feature_id="2026-05-12-plan-deps-bad",
+        spec_body=("# Acceptance Criteria\n1. crit-1 done\n"),
+        # Plan-tasks is clean (Slice 1 unblocks crit-1) so only the
+        # Verified Dependencies table trips a HIGH (wildcard `*` version
+        # is forbidden by master design §7.3).
+        plan_body=(
+            "# Slice 1: setup\n"
+            "**Files in scope:** `src/foo.py`\n"
+            "**Acceptance:** crit-1 met\n"
+            "\n"
+            "## Verified Dependencies\n"
+            "| Package | Version / range | Registry | Source checked | Key APIs used | Notes |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| requests | * | pypi | https://pypi.org | get | hello |\n"
+        ),
+    )
+
+    on_disk_before = target.read_text(encoding="utf-8")
+
+    with pytest.raises(state.StateError, match=r"HIGH|BLOCK") as exc:
+        state.complete_phase(
+            target,
+            phase="plan",
+            schema_path=schemas_dir / "state.schema.json",
+        )
+
+    assert "PLAN.md" in str(exc.value)
+    assert "verified-deps" in str(exc.value)
+    assert target.read_text(encoding="utf-8") == on_disk_before
+
+
+def test_complete_phase_allows_plan_exit_when_plan_artifacts_are_clean(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """When PLAN.md slices unblock every AC and any Verified Dependencies
+    table is well-formed, ``complete_phase("plan")`` transitions normally."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = _seed_feature_with_plan_in_progress(
+        repo,
+        schemas_dir,
+        feature_id="2026-05-12-plan-ok",
+        spec_body=("# Acceptance Criteria\n1. crit-1 done\n"),
+        plan_body=(
+            "# Slice 1: setup\n**Files in scope:** `src/foo.py`\n**Acceptance:** crit-1 met\n"
+        ),
+    )
+
+    result = state.complete_phase(
+        target,
+        phase="plan",
+        schema_path=schemas_dir / "state.schema.json",
+        now="2026-05-12T12:00:00Z",
+    )
+
+    assert result["phases"]["plan"]["status"] == "done"
+    assert result["phases"]["plan"]["completed_at"] == "2026-05-12T12:00:00Z"
+
+
+def test_complete_phase_plan_isolation_scenario_findings_do_not_fire_on_plan(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """The scenarios validator is scoped to the ``scenarios`` (and
+    ``spec``) phase only. Completing ``plan`` must not run
+    ``validate_scenarios`` — features routinely amend SPEC scenarios
+    mid-feature and a mismatch must not block plan exit. This fixture's
+    SPEC trips ``validate_scenarios`` HIGH (orphan scenario) but the plan
+    gate must let the transition through because the PLAN-side checks
+    are clean."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = _seed_feature_with_plan_in_progress(
+        repo,
+        schemas_dir,
+        feature_id="2026-05-12-plan-isol",
+        # SPEC has a scenario that does not map to any AC (orphan HIGH if
+        # ``validate_scenarios`` were in scope here).
+        spec_body=(
+            "# Scenarios\n"
+            "Scenario: orphan demo with no ac token\n"
+            "# Acceptance Criteria\n"
+            "1. crit-1 done\n"
+        ),
+        plan_body=(
+            "# Slice 1: setup\n**Files in scope:** `src/foo.py`\n**Acceptance:** crit-1 met\n"
+        ),
+    )
+
+    result = state.complete_phase(
+        target,
+        phase="plan",
+        schema_path=schemas_dir / "state.schema.json",
+        now="2026-05-12T12:00:00Z",
+    )
+
+    assert result["phases"]["plan"]["status"] == "done"
+
+
 def test_finish_feature_sets_current_phase_done_without_phases_entry(
     tmp_path: Path, schemas_dir: Path
 ) -> None:

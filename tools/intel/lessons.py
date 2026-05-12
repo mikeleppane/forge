@@ -945,7 +945,7 @@ def _score_lesson(lesson: Lesson, scope_keywords: set[str]) -> int:
 
 
 def load_and_filter(
-    repo_root: Path,
+    repo_root: Path | str,
     *,
     idea_text: str = "",
     files_in_scope: Iterable[Path] = (),
@@ -969,7 +969,10 @@ def load_and_filter(
        ``idea_text`` and from each ``files_in_scope`` path's string form.
 
     Args:
-        repo_root: Repository root containing ``.forge/intel/lessons.md``.
+        repo_root: Repository root containing ``.forge/intel/lessons.md``. A
+            ``str`` is accepted at the entry boundary and coerced to ``Path``
+            so agent callers that improvise on the call shape do not trip a
+            cryptic ``TypeError`` on the first ``/`` operator.
         idea_text: Free-form idea / spec intent text.
         files_in_scope: Paths to include as scope signals.
 
@@ -983,6 +986,7 @@ def load_and_filter(
             :data:`MAX_LESSON_WORDS`. The author must trim Trap/Avoidance
             bodies, demote some to HIGH, or retire stale entries.
     """
+    repo_root = Path(repo_root)
     path = _lessons_path(repo_root)
     if not path.exists():
         return [], []

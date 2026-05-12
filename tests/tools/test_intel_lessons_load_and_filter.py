@@ -247,3 +247,17 @@ def test_load_and_filter_kept_sorted_by_numeric_id(tmp_path: Path) -> None:
 
 def test_load_and_filter_exposes_max_lesson_words_constant() -> None:
     assert lessons.MAX_LESSON_WORDS == 600
+
+
+def test_load_and_filter_coerces_string_repo_root(tmp_path: Path) -> None:
+    """A string repo_root must not trip ``TypeError`` on ``str / ".forge"``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers that improvise the call shape and pass a string for an
+    annotated ``Path`` parameter must reach the documented empty-pair
+    branch when the lessons file is absent, not a cryptic operator error.
+    """
+    kept, dropped = lessons.load_and_filter(str(tmp_path))
+
+    assert kept == []
+    assert dropped == []

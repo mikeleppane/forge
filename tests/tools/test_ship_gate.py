@@ -1733,3 +1733,16 @@ cycles: 1
     findings = sg.parse_review_findings(ok)
     assert len(findings) == 1
     assert findings[0].resolved_by == f"accepted-risk:{bounded_reason}"
+
+
+def test_parse_review_findings_coerces_string_path(tmp_path: Path) -> None:
+    """A string ``path`` must not trip ``AttributeError`` on ``path.exists()``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers paste literal filesystem paths from skill snippets like
+    ``.forge/features/<id>/REVIEW.code.md``. A cryptic operator error on
+    ``str`` is worse than reaching the documented missing-file empty list.
+    """
+    findings = sg.parse_review_findings(str(tmp_path / "REVIEW.code.md"))
+
+    assert findings == []

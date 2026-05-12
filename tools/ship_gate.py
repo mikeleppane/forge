@@ -236,7 +236,7 @@ def _parse_table_columns(line: str) -> list[str]:
     return [c.strip() for c in cells]
 
 
-def parse_review_findings(path: Path) -> list[ShipFinding]:
+def parse_review_findings(path: Path | str) -> list[ShipFinding]:
     """Parse REVIEW.code.md for ``Status: open`` findings tagged ``[constitution:A<n>]``.
 
     Resolved or accepted-risk rows are convergence-history and skipped —
@@ -280,7 +280,10 @@ def parse_review_findings(path: Path) -> list[ShipFinding]:
     trail and earns the stricter check.
 
     Args:
-        path: Path to REVIEW.code.md.
+        path: Path to REVIEW.code.md. A ``str`` is accepted at the entry
+            boundary and coerced to ``Path`` so agent callers that paste a
+            literal filesystem path from skill snippets do not trip a
+            cryptic ``AttributeError`` on ``path.exists()``.
 
     Returns:
         List of unresolved ``[constitution:A<n>]``-tagged findings, one
@@ -290,6 +293,7 @@ def parse_review_findings(path: Path) -> list[ShipFinding]:
         ShipGateError: When a row's Status, Severity, or Resolved by cell
             holds an unrecognized value.
     """
+    path = Path(path)
     out: list[ShipFinding] = []
     for row in _iter_review_rows(path):
         if row.status != "open":

@@ -312,6 +312,33 @@ def test_article_fenced_block_phantom_header_still_ignored(tmp_path: Path) -> No
     assert ids == ["A1"]
 
 
+def test_parse_constitution_text_strips_utf8_bom() -> None:
+    """A UTF-8 BOM prefix must not silence the Constitution parser.
+
+    Notepad / some Windows editors write the file as U+FEFF + body. The
+    parser previously checked ``text.startswith('---' + newline)`` strictly
+    and raised ``ConstitutionError`` on the BOM-prefixed body, even though
+    the file is otherwise valid. After the fix the BOM-prefixed text parses
+    identically to the BOM-less equivalent.
+    """
+    body = (FIXTURES / "passing.md").read_text(encoding="utf-8")
+    clean_articles = cn.parse_constitution_text(body)
+    bom_articles = cn.parse_constitution_text("﻿" + body)
+    assert [a.id for a in bom_articles] == [a.id for a in clean_articles]
+    assert bom_articles == clean_articles
+
+
+def test_parse_constitution_file_strips_utf8_bom(tmp_path: Path) -> None:
+    """A BOM-prefixed Constitution file on disk parses identically to a BOM-less one."""
+    body = (FIXTURES / "passing.md").read_text(encoding="utf-8")
+    bom_path = tmp_path / "CONSTITUTION.md"
+    bom_path.write_text("﻿" + body, encoding="utf-8")
+    clean_articles = cn.parse_constitution(FIXTURES / "passing.md")
+    bom_articles = cn.parse_constitution(bom_path)
+    assert [a.id for a in bom_articles] == [a.id for a in clean_articles]
+    assert bom_articles == clean_articles
+
+
 def test_article_to_budget_dict_preserves_null_optionals() -> None:
     """Articles without Reference/Rationale serialize them as None, not omitted."""
     text = (

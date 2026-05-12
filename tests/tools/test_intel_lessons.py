@@ -701,6 +701,49 @@ def test_append_refuses_concurrent_writer_under_lock(
         held_fh.close()
 
 
+def test_parse_text_strips_utf8_bom() -> None:
+    """A UTF-8 BOM prefix must not silence the parser.
+
+    Reproduces the BOM-prefixed file bug where Notepad / some Windows editors
+    write the file as U+FEFF + body. The parser previously matched ``## L``
+    strictly at column 0 and returned ``[]`` when the BOM landed directly on
+    a lesson header line, hiding every entry. After the fix the BOM-prefixed
+    text must parse identically to the BOM-less equivalent — both when the
+    BOM sits in front of a frontmatter ``---`` block and when it sits in
+    front of a bare ``## L`` header.
+    """
+    bom_less_with_header = _file(_entry(nid="L001"))
+    bom_prefixed_with_header = "﻿" + bom_less_with_header
+    assert lessons.parse_text(bom_prefixed_with_header) == lessons.parse_text(bom_less_with_header)
+
+    # Headerless case — BOM sits directly in front of the ``## L001`` header
+    # so the strict ``startswith('## L')`` check fails without the fix and
+    # the parser silently returns ``[]``.
+    bom_less_headerless = _entry(nid="L001")
+    bom_prefixed_headerless = "﻿" + bom_less_headerless
+    parsed_headerless = lessons.parse_text(bom_prefixed_headerless)
+    assert len(parsed_headerless) == 1
+    assert parsed_headerless[0].id == "L001"
+    assert parsed_headerless == lessons.parse_text(bom_less_headerless)
+
+
+def test_parse_file_strips_utf8_bom(tmp_path: Path) -> None:
+    """A BOM-prefixed lessons.md on disk parses identically to a BOM-less one.
+
+    Uses the bare-header layout (no frontmatter) so the BOM lands directly
+    on the ``## L001`` line — the exact shape that triggers the silent
+    empty-return bug.
+    """
+    bom_less = _entry(nid="L001")
+    clean_path = _write(tmp_path / "clean" / "lessons.md", bom_less)
+    bom_path = _write(tmp_path / "bom" / "lessons.md", "﻿" + bom_less)
+    parsed_clean = lessons.parse(clean_path)
+    parsed_bom = lessons.parse(bom_path)
+    assert len(parsed_bom) == 1
+    assert parsed_bom[0].id == "L001"
+    assert parsed_bom == parsed_clean
+
+
 def test_append_post_check_refuses_when_slot_was_filled_concurrently(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

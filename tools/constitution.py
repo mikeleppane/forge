@@ -88,6 +88,12 @@ def parse_constitution_text(text: str) -> list[Article]:
     hold the body in memory (e.g. ``classify_change`` comparing two text
     snapshots) can avoid the TemporaryDirectory dance.
 
+    A single leading UTF-8 BOM (U+FEFF) is stripped before the frontmatter
+    check so files written by Notepad / some Windows editors do not raise
+    ``Constitution missing frontmatter`` on an otherwise-valid file. Only
+    one BOM is removed; downstream unicode normalisation is left to the
+    caller.
+
     Args:
         text: Full Constitution body, frontmatter included.
 
@@ -98,6 +104,7 @@ def parse_constitution_text(text: str) -> list[Article]:
         ConstitutionError: When frontmatter cannot be parsed or an article
             header is malformed.
     """
+    text = text.removeprefix("﻿")
     if not text.startswith("---\n"):
         raise ConstitutionError("Constitution missing frontmatter")
     parts = text.split("---\n", 2)

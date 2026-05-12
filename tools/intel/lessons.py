@@ -257,7 +257,13 @@ def parse_text(text: str) -> list[Lesson]:
     phantom lessons. Field bodies (Trap, Avoidance, ...) are captured from
     the raw line stream so user-authored inline backticks and fenced blocks
     round-trip verbatim.
+
+    A single leading UTF-8 BOM (U+FEFF) is stripped before parsing so files
+    written by Notepad / some Windows editors do not silently return ``[]``
+    when the BOM lands directly on a ``## L`` header line. Only one BOM is
+    removed; downstream unicode normalisation is left to the caller.
     """
+    text = text.removeprefix("﻿")
     state = _ParseState()
     blocks: list[dict[str, object]] = []
     for line_idx, raw_line in enumerate(text.splitlines(), start=1):

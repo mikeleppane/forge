@@ -79,10 +79,21 @@ _DENY_REASON = (
     "`claude plugin list` (typically "
     "~/.claude/plugins/cache/forge-marketplace/forge/<version>).\n"
     "\n"
-    "For POST-SEED mutations, call the tools.state.* helpers via Bash "
-    "(complete_phase / start_phase / record_routing_decision / "
-    "record_refined_idea / record_commit / append_deviation / "
-    "set_execute_current_slice)."
+    "For POST-SEED mutations, run forge-state via Bash (do NOT translate "
+    "into a Python heredoc — every helper has a keyword-only signature "
+    "that agents consistently mis-call):\n"
+    '  forge-state refine --feature <id> --refined "<paragraph>"\n'
+    "  forge-state complete-phase --feature <id> --phase <name>\n"
+    "  forge-state start-phase --feature <id> --phase <name>\n"
+    "  forge-state set-current-slice --feature <id> --slice <N>\n"
+    "  forge-state record-commit --feature <id> --sha <sha> "
+    '--phase <name> --subject "<line>"\n'
+    "  forge-state deviation --feature <id> --phase <name> "
+    '--cause "<text>" --resolution "<text>"\n'
+    "\n"
+    "When forge-state is not on PATH, use the module form:\n"
+    "  PYTHONPATH=<plugin_install> python3 -m tools.state_cli "
+    "<subcommand> ..."
 )
 
 

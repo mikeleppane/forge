@@ -480,7 +480,14 @@ def _load_conventions_or_error(repo_root: Path) -> tuple[list[Convention] | None
     try:
         rules = _load_conventions(repo_root)
     except (ValueError, OSError) as exc:
-        return None, f"conventions.json present but invalid: {exc}"
+        # The structural break is the operator's problem, not a runtime
+        # decision. Quote the underlying parse / schema error and route the
+        # operator at the dedicated validator so they can fix the file with
+        # one command instead of guessing.
+        return None, (
+            f".forge/conventions.json is present but the loader refused it: {exc}. "
+            f"Diagnose with: python -m tools.validate --target conventions"
+        )
     return rules, None
 
 

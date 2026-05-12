@@ -143,7 +143,8 @@ def test_check_dispatch_brief_conventions_denies_when_conventions_json_malformed
         "Co-Authored-By: Claude", repo_root=tmp_path
     )
     assert not allow
-    assert "conventions.json present but invalid" in reason
+    assert ".forge/conventions.json is present" in reason
+    assert "python -m tools.validate --target conventions" in reason
 
 
 def test_check_dispatch_brief_conventions_denies_when_schema_invalid_rule(tmp_path: Path) -> None:
@@ -155,7 +156,8 @@ def test_check_dispatch_brief_conventions_denies_when_schema_invalid_rule(tmp_pa
         "no required text here", repo_root=tmp_path
     )
     assert not allow
-    assert "conventions.json present but invalid" in reason
+    assert ".forge/conventions.json is present" in reason
+    assert "python -m tools.validate --target conventions" in reason
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +704,8 @@ def test_dispatch_brief_deny_reason_for_malformed_conventions_includes_repo(
     allow, reason = check_budget._check_dispatch_brief_conventions("anything", repo_root=tmp_path)
     assert not allow
     assert f"(repo: {tmp_path})" in reason
-    assert "conventions.json present but invalid" in reason
+    assert ".forge/conventions.json is present" in reason
+    assert "python -m tools.validate --target conventions" in reason
 
 
 # ---------------------------------------------------------------------------

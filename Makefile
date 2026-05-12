@@ -59,10 +59,7 @@ clean: ## Remove caches (ruff, mypy, pytest, pyc, coverage)
 	@find . -type d -name "*.egg-info" -prune -exec rm -rf {} +
 
 plugin-refresh: ## Rebuild the local Claude Code plugin cache from this repo (no version bump needed)
-	@claude plugin update forge >/dev/null 2>&1 || true
-	@if ! grep -q '_STATE_SCHEMA_PATH' "$$HOME/.claude/plugins/cache/forge-marketplace/forge/0.1.0/tools/routing.py" 2>/dev/null; then \
-		echo "claude plugin update did not refresh the cache; running uninstall + reinstall..."; \
-		claude plugin uninstall forge >/dev/null 2>&1 || true; \
-		claude plugin install forge@forge-marketplace; \
-	fi
-	@echo "Plugin cache refreshed. Restart your Claude Code session to pick up the new code."
+	@claude plugin uninstall forge >/dev/null 2>&1 || true
+	@claude plugin marketplace update forge-marketplace >/dev/null 2>&1 || true
+	@claude plugin install forge@forge-marketplace
+	@echo "Plugin cache rebuilt from current HEAD. Restart your Claude Code session to pick up the new code."

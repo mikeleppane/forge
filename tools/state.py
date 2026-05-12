@@ -82,6 +82,14 @@ _REFINE_ATTEMPTS_CAP: Final[int] = 5
 # treated as v1 by application convention.
 _FLOW_VERSION_V3: Final[int] = 3
 
+# Schema resolved from the FORGE plugin install location, not from the
+# caller-supplied ``repo_root``. The latter points at the user's target
+# repository, which has no obligation to carry a copy of FORGE's schemas.
+# Pattern mirrors ``tools/check_schemas.py`` and ``tools/cross_ai/config.py``.
+_STATE_SCHEMA_PATH: Final[Path] = (
+    Path(__file__).resolve().parents[1] / "schemas" / "state.schema.json"
+)
+
 
 # Canonical per-tier phase orderings, sourced from spec sections 6.1-6.3
 # (`docs/specs/2026-05-09-m8-research-and-cross-ai-design.md`). The full-tier
@@ -1067,8 +1075,9 @@ def migrate_to_v3(
     Args:
         repo_root: Repository root containing the ``.forge/`` tree.
         feature_id: Feature folder name under ``.forge/features/``.
-        schema_path: Optional schema path; defaults to
-            ``<repo_root>/schemas/state.schema.json``.
+        schema_path: Optional schema path; defaults to the FORGE plugin
+            install schema (``_STATE_SCHEMA_PATH``) so the helper works
+            against any target repository.
 
     Returns:
         The (possibly updated) state.json payload.
@@ -1078,7 +1087,7 @@ def migrate_to_v3(
             shipped yet, or schema validation fails after the bump.
     """
     if schema_path is None:
-        schema_path = repo_root / "schemas" / "state.schema.json"
+        schema_path = _STATE_SCHEMA_PATH
     state_path = repo_root / ".forge" / "features" / feature_id / "state.json"
     payload = read_state(state_path, schema_path=schema_path)
 

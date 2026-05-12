@@ -91,6 +91,22 @@ def test_find_active_feature_surfaces_malformed_state_json(tmp_path: Path) -> No
         state.find_active_feature(tmp_path)
 
 
+def test_find_active_feature_coerces_string_repo_root(tmp_path: Path) -> None:
+    """A ``str`` ``repo_root`` must resolve the same active feature as the ``Path`` form.
+
+    Agent callers improvising on the call shape pass a ``str`` repo path;
+    the helper composes ``repo_root / ".forge" / "features"`` immediately,
+    which trips a cryptic ``TypeError`` at the first ``/`` operator when no
+    boundary coercion sits at the entry. The string form must return the
+    same folder path as the ``Path`` form for the same inputs.
+    """
+    expected = _make_feature(tmp_path, "2026-05-12-alpha", "execute")
+
+    resolved = state.find_active_feature(str(tmp_path))
+
+    assert resolved == expected
+
+
 def test_find_active_feature_skips_archive_directory(tmp_path: Path) -> None:
     """Archive folder under .forge/features/archive/ must not be considered active."""
     expected = _make_feature(tmp_path, "2026-05-02-beta", "execute")

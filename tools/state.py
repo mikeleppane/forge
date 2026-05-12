@@ -1673,7 +1673,7 @@ def migrate_to_v3(
 
 
 def find_active_feature(
-    repo_root: Path,
+    repo_root: Path | str,
     feature_id: str | None = None,
 ) -> Path:
     """Resolve which .forge/features/<id>/ to act on. Read-only.
@@ -1686,7 +1686,10 @@ def find_active_feature(
     Excludes any folder under `.forge/features/archive/`.
 
     Args:
-        repo_root: Repository root containing the .forge/ tree.
+        repo_root: Repository root containing the .forge/ tree. A ``str`` is
+            accepted at the entry boundary and coerced to ``Path`` so agent
+            callers that improvise on the call shape do not trip a cryptic
+            ``TypeError`` at the first ``/`` operator.
         feature_id: Optional explicit feature id (matches folder name).
 
     Returns:
@@ -1696,6 +1699,7 @@ def find_active_feature(
         StateError: when no feature matches, multiple active without explicit id,
             or the explicit id has no matching folder/state.json.
     """
+    repo_root = Path(repo_root)
     features_root = repo_root / ".forge" / "features"
     if feature_id is not None:
         if not _FEATURE_ID_RE.fullmatch(feature_id):

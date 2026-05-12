@@ -14,6 +14,28 @@ initial seed (creating a new state.json from nothing) and
 schema validation and produce broken seeds; this hook closes that bypass
 at the tool boundary.
 
+Threat-model summary (what this hook does and does NOT cover):
+
+* **Protected**: ``Write`` / ``Edit`` / ``MultiEdit`` targeting any path
+  whose component sequence ends with ``.forge/features/<id>/state.json``.
+* **NOT protected**: ``SPEC.md`` / ``PLAN.md`` / ``UNDERSTANDING.md`` /
+  ``decisions.md`` and other per-feature artifacts. Their shape is owned
+  by the ``python -m tools.validate`` family, which fails downstream
+  rather than at the tool boundary — operators routinely hand-edit these
+  files, so hook-level refusal would be hostile.
+* **NOT protected**: ``.forge/CONSTITUTION.md`` /
+  ``.forge/conventions.json`` / ``.forge/intel/lessons.md``. The
+  authoring helpers (``tools.constitution_amend``, ``tools.intel.lessons``)
+  apply atomic-pair writes and advisory locks; direct edits land but the
+  validator surfaces shape errors at next read.
+* **Documented design — NOT a bug**: symlink traversal is not resolved.
+  ``ln -s state.json alias.json`` and then writing ``alias.json``
+  bypasses the literal-path matcher. The threat requires an attacker
+  who can already create files in the repo, in which case state.json
+  is the least of the target's concerns; resolving symlinks would
+  introduce a TOCTOU race and several pathlib portability hazards for
+  marginal benefit.
+
 Stdlib only. Idempotent and side-effect-free.
 
 Hook input shape (per Claude Code docs):

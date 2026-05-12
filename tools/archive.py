@@ -71,6 +71,11 @@ _CHANGE_ID_RE = re.compile(
 # Minimum token length to survive the content-word filter (step 5 of slug_from_idea).
 _SLUG_MIN_TOKEN_LEN: int = 2
 
+# Filesystem name-length cap for the derived slug. NAME_MAX on the standard
+# POSIX filesystems is 255 bytes; subtract the 11-byte ``YYYY-MM-DD-`` date
+# prefix plus headroom for suffix-disambig variants to land at 200 bytes.
+_SLUG_MAX_BYTES: int = 200
+
 _STOPWORDS: frozenset[str] = frozenset(
     {
         "a",
@@ -174,6 +179,18 @@ def slug_from_idea(text: str, *, max_words: int = 5) -> str:
         raise ArchiveError(f"slug computed from idea is empty: {text}")
     if not _CAPABILITY_SLUG_SCHEMA_RE.fullmatch(slug):
         raise ArchiveError(f"slug computed from idea is too short: {slug} ({text})")
+    # Filesystem-safety cap: most POSIX filesystems (ext4, btrfs, xfs) enforce
+    # NAME_MAX = 255 bytes on a single path component. The feature folder
+    # name is ``YYYY-MM-DD-<slug>`` (11 bytes of date prefix) and the seed
+    # may add suffix-disambig text, so cap the slug at 200 bytes leaving a
+    # comfortable margin. Pathological inputs (single 4000-char token with
+    # no spaces; only filterable characters in a single long word) would
+    # otherwise OSError mid-seed with "File name too long".
+    if len(slug.encode("utf-8")) > _SLUG_MAX_BYTES:
+        raise ArchiveError(
+            f"slug computed from idea exceeds {_SLUG_MAX_BYTES}-byte filesystem cap "
+            f"(got {len(slug.encode('utf-8'))} bytes); shorten the idea before /forge:do"
+        )
     return slug
 
 

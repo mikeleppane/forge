@@ -74,6 +74,25 @@ _FEATURE_SLUG_RE: re.Pattern[str] = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-
 # dump (which inlines the entire payload).
 _IDEA_MAX_CHARS: int = 4000
 
+
+def _validate_idea(idea: str) -> None:
+    """Refuse empty / whitespace-only / over-cap idea text before any mutation.
+
+    Centralised so the ``seed_routed_feature`` body stays under the branch
+    linter cap; the empty-string guard and the length guard share a single
+    call site.
+    """
+    if not isinstance(idea, str) or not idea.strip():
+        raise ValueError(
+            "idea must be a non-empty string with at least one non-whitespace character"
+        )
+    if len(idea) > _IDEA_MAX_CHARS:
+        raise ValueError(
+            f"idea exceeds {_IDEA_MAX_CHARS}-char cap (got {len(idea)} chars); "
+            "trim before /forge:do"
+        )
+
+
 # Schema resolved from the plugin install location, not the caller-supplied
 # ``repo_root``. FORGE's schemas ship with the plugin (this module lives in
 # ``tools/``; ``parents[1]`` is the plugin root). The runtime ``repo_root``
@@ -238,16 +257,11 @@ def seed_routed_feature(
             'research escalates to standard tier; use /forge:do --standard --research "<idea>"'
         )
 
-    # Pre-validate idea length BEFORE any other mutation so the operator
-    # sees a clean cap error instead of the schema's verbose ValidationError
-    # dump (which inlines the full payload). The schema mirrors the same
-    # 4000-char cap; we surface the friendly message here so the routing
-    # helper owns the user-visible wording.
-    if len(idea) > _IDEA_MAX_CHARS:
-        raise ValueError(
-            f"idea exceeds {_IDEA_MAX_CHARS}-char cap (got {len(idea)} chars); "
-            "trim before /forge:do"
-        )
+    # Pre-validate idea shape BEFORE any other mutation so the operator sees
+    # a clean error instead of the schema's verbose ValidationError dump or
+    # a downstream ``ArchiveError`` from ``slug_from_idea`` once disk
+    # activity has begun.
+    _validate_idea(idea)
 
     # Step 2: derive seed entry phase + effective phase list from
     # (tier, research_opt_in). ``create_feature_folder`` enforces the

@@ -292,3 +292,17 @@ def test_to_redaction_config_accepts_gitignore_overlay() -> None:
     rules = RedactionRules()
     adapted = to_redaction_config(rules, gitignore_patterns=(".tmp/**",))
     assert adapted.gitignore_patterns == (".tmp/**",)
+
+
+def test_load_config_coerces_string_repo_root(tmp_path: Path) -> None:
+    """A string repo_root must not trip ``TypeError`` on ``str / ".forge"``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers that improvise the call shape and pass a string for an
+    annotated ``Path`` parameter must reach the documented default-config
+    branch when ``.forge/config.json`` is absent, not a cryptic operator
+    error.
+    """
+    config = load_config(str(tmp_path))
+
+    assert config == CrossAiConfig()

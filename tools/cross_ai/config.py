@@ -212,13 +212,20 @@ def to_redaction_config(
     )
 
 
-def load_config(repo_root: Path) -> CrossAiConfig:
+def load_config(repo_root: Path | str) -> CrossAiConfig:
     """Load + validate the cross_ai block from ``<repo_root>/.forge/config.json``.
 
     Returns ``CrossAiConfig()`` defaults when the file or block is absent.
     Raises ``CrossAiConfigError`` on schema mismatch, an unsafe regex
     (length-cap or probe-compile failure), or unreadable JSON.
+
+    Args:
+        repo_root: Repository root containing the ``.forge/`` tree. A ``str``
+            is accepted at the entry boundary and coerced to ``Path`` so
+            agent callers that improvise on the call shape do not trip a
+            cryptic ``TypeError`` on the first ``/`` operator.
     """
+    repo_root = Path(repo_root)
     config_path = repo_root / ".forge" / "config.json"
     if not config_path.exists():
         return CrossAiConfig()

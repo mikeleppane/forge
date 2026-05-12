@@ -28,6 +28,7 @@ from .health import validate_health
 from .lessons import validate_lessons
 from .plan import validate_plan_tasks, validate_verified_deps
 from .qa_shape import validate_qa_shape
+from .review_lesson_tags import validate_review_lesson_tags
 from .spec_semantic import validate_anchors, validate_scenarios
 from .spec_structural import (
     validate_capability_spec_sections,
@@ -63,6 +64,7 @@ __all__ = [
     "validate_plan_tasks",
     "validate_qa_shape",
     "validate_research",
+    "validate_review_lesson_tags",
     "validate_scenarios",
     "validate_tdd_evidence",
     "validate_verified_deps",

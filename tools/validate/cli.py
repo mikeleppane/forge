@@ -20,7 +20,6 @@ from ._config_shape import validate_config
 from ._feature_layout import PLAN_FILENAME, SPEC_FILENAME
 from ._finding import EXIT_NONZERO_SEVERITIES, Finding, _finding_to_dict
 from ._research_shape import validate_research
-from ._review_lesson_tags import validate_review_md_lesson_tags
 from .constitution import validate_constitution
 from .conventions import validate_conventions
 from .delta import validate_delta
@@ -30,6 +29,7 @@ from .health import validate_health
 from .lessons import validate_lessons
 from .plan import validate_plan_tasks, validate_verified_deps
 from .qa_shape import validate_qa_shape
+from .review_lesson_tags import validate_review_lesson_tags
 from .spec_semantic import validate_anchors, validate_scenarios
 from .spec_structural import (
     validate_capability_uniqueness,
@@ -53,7 +53,14 @@ _PER_FILE_TARGETS: frozenset[str] = frozenset(
     }
 )
 _PER_FOLDER_TARGETS: frozenset[str] = frozenset(
-    {"deviations", "tdd_evidence", "domain_glossary", "qa_shape", "git-conventions"}
+    {
+        "deviations",
+        "tdd_evidence",
+        "domain_glossary",
+        "qa_shape",
+        "git-conventions",
+        "review-lesson-tags",
+    }
 )
 _REPO_WIDE_TARGETS: frozenset[str] = frozenset(
     {"health", "ship", "all", "config", "conventions", "lessons"}
@@ -77,6 +84,7 @@ _TARGET_CHOICES: tuple[str, ...] = (
     "domain_glossary",
     "qa_shape",
     "research",
+    "review-lesson-tags",
     "constitution",
     "config",
     "conventions",
@@ -161,6 +169,13 @@ def _dispatch_git_conventions(
 
 def _dispatch_research(args: argparse.Namespace, repo_root: Path) -> list[Finding]:  # noqa: ARG001
     return list(validate_research(args.path))
+
+
+def _dispatch_review_lesson_tags(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> list[Finding]:
+    return list(validate_review_lesson_tags(args.path, repo_root))
 
 
 def _dispatch_config(
@@ -359,7 +374,7 @@ def _validate_feature(
     # Cross-check REVIEW.code.md lesson tags against ``.forge/intel/lessons.md``
     # at validate time so a row Severity / lesson Severity mismatch surfaces in
     # CI instead of waiting until /forge:ship. No-op when either file is absent.
-    findings.extend(validate_review_md_lesson_tags(feature, repo_root))
+    findings.extend(validate_review_lesson_tags(feature, repo_root))
     return findings
 
 
@@ -432,6 +447,7 @@ _TARGET_DISPATCH: dict[str, Callable[[argparse.Namespace, Path], list[Finding]]]
     "qa_shape": _dispatch_qa_shape,
     "git-conventions": _dispatch_git_conventions,
     "research": _dispatch_research,
+    "review-lesson-tags": _dispatch_review_lesson_tags,
     "constitution": _dispatch_constitution,
     "config": _dispatch_config,
     "conventions": _dispatch_conventions,

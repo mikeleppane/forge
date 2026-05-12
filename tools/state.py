@@ -1430,7 +1430,7 @@ def set_execute_current_slice(
 
 
 def record_commit(
-    path: Path,
+    path: Path | str,
     *,
     sha: str,
     phase: str,
@@ -1451,7 +1451,10 @@ def record_commit(
     file behind.
 
     Args:
-        path: state.json path.
+        path: state.json path. A ``str`` is accepted at the entry boundary
+            and coerced to ``Path`` so agent callers that improvise on the
+            call shape do not trip a cryptic ``AttributeError`` deep inside
+            the lock-acquisition chain.
         sha: 7-40 lowercase hex character git SHA (matches schema pattern).
         phase: Lifecycle phase the commit belongs to.
         subject: Commit subject line; must be non-empty.
@@ -1475,6 +1478,7 @@ def record_commit(
     if not isinstance(subject, str) or not subject:
         raise StateError("commit subject must be a non-empty string")
 
+    path = Path(path)
     with state_lock(path):
         payload = read_state(path, schema_path=schema_path)
         commits = payload.setdefault("commits", [])

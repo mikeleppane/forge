@@ -1366,3 +1366,46 @@ def test_feature_folder_exists_coerces_string_repo_root(tmp_path: Path) -> None:
 
     assert state.feature_folder_exists(str(tmp_path), feature_id) is True
     assert state.feature_folder_exists(str(tmp_path), "2026-05-12-missing") is False
+
+
+def test_record_commit_coerces_string_path(tmp_path: Path, schemas_dir: Path) -> None:
+    """A ``str`` ``path`` must append the commit identically to the ``Path`` form.
+
+    Agent callers improvising on the call shape pass a ``str`` state.json
+    path; the helper calls ``state_lock(path)`` immediately, which invokes
+    ``state_path.exists()`` and ``state_path.with_name(...)`` — both ``Path``
+    methods that trip a cryptic ``AttributeError`` deep inside the
+    lock-acquisition chain when no boundary coercion sits at the entry. The
+    string form must append the commit entry identically to the ``Path``
+    form for the same inputs.
+    """
+    target = tmp_path / "state.json"
+    initial = {
+        "feature_id": "2026-05-12-coerce-commit",
+        "tier": "focused",
+        "current_phase": "execute",
+        "phases": {"execute": {"status": "in_progress", "started_at": "2026-05-12T10:00:00Z"}},
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    schema_path = schemas_dir / "state.schema.json"
+    state.write_state(target, initial, schema_path=schema_path)
+
+    result = state.record_commit(
+        str(target),
+        sha="abc1234",
+        phase="execute",
+        subject="feat(demo): add thing",
+        logged_at="2026-05-12T11:30:00Z",
+        schema_path=schema_path,
+    )
+
+    assert result["commits"] == [
+        {
+            "sha": "abc1234",
+            "phase": "execute",
+            "subject": "feat(demo): add thing",
+            "logged_at": "2026-05-12T11:30:00Z",
+        }
+    ]

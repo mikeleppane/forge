@@ -593,6 +593,155 @@ def test_start_phase_raises_state_error_when_phases_missing(tmp_path: Path) -> N
         state.start_phase(target, phase="spec")
 
 
+def _seed_feature_with_spec_in_progress(
+    repo_root: Path,
+    schemas_dir: Path,
+    *,
+    feature_id: str,
+    spec_body: str,
+) -> Path:
+    """Build a tmp ``.forge/features/<id>/`` carrying state.json + SPEC.md."""
+    feature = repo_root / ".forge" / "features" / feature_id
+    feature.mkdir(parents=True)
+    initial = {
+        "feature_id": feature_id,
+        "tier": "focused",
+        "current_phase": "spec",
+        "phases": {"spec": {"status": "in_progress", "started_at": "2026-05-12T10:00:00Z"}},
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    target = feature / "state.json"
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+    (feature / "SPEC.md").write_text(spec_body, encoding="utf-8")
+    return target
+
+
+def test_complete_phase_refuses_spec_exit_with_high_anchor_findings(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """Completing the ``spec`` phase must run the spec-semantic validators
+    against the feature's SPEC.md and refuse the transition when any
+    finding has severity ``HIGH`` or ``BLOCK``. The mechanical gate
+    replaces the prose-only enforcement in the forge-spec skill — a
+    missing-anchor SPEC must not be able to exit spec via
+    ``complete_phase``."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = _seed_feature_with_spec_in_progress(
+        repo,
+        schemas_dir,
+        feature_id="2026-05-12-anchored",
+        spec_body=(
+            "# Codebase Anchors\n"
+            "- `src/does_not_exist.py:bar`\n"
+            "# Scenarios\n"
+            "Scenario: 1 demo\n"
+            "# Acceptance Criteria\n"
+            "1. crit-1 done\n"
+        ),
+    )
+
+    on_disk_before = target.read_text(encoding="utf-8")
+
+    with pytest.raises(state.StateError, match=r"HIGH|BLOCK") as exc:
+        state.complete_phase(
+            target,
+            phase="spec",
+            schema_path=schemas_dir / "state.schema.json",
+        )
+
+    assert "SPEC.md" in str(exc.value)
+    assert target.read_text(encoding="utf-8") == on_disk_before, (
+        "state.json must not be mutated when the gate refuses"
+    )
+
+
+def test_complete_phase_allows_spec_exit_when_anchors_resolve(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """When SPEC.md's Codebase Anchors all resolve under the discovered
+    repo root, ``complete_phase("spec")`` transitions normally."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "foo.py").write_text("def bar() -> None:\n    pass\n", encoding="utf-8")
+    target = _seed_feature_with_spec_in_progress(
+        repo,
+        schemas_dir,
+        feature_id="2026-05-12-clean",
+        spec_body=(
+            "# Codebase Anchors\n"
+            "- `src/foo.py:bar`\n"
+            "# Scenarios\n"
+            "Scenario: 1 demo crit-1\n"
+            "# Acceptance Criteria\n"
+            "1. crit-1 done\n"
+        ),
+    )
+
+    result = state.complete_phase(
+        target,
+        phase="spec",
+        schema_path=schemas_dir / "state.schema.json",
+        now="2026-05-12T12:00:00Z",
+    )
+
+    assert result["phases"]["spec"]["status"] == "done"
+    assert result["phases"]["spec"]["completed_at"] == "2026-05-12T12:00:00Z"
+
+
+def test_complete_phase_non_spec_phases_are_not_gated_by_semantic_validators(
+    tmp_path: Path, schemas_dir: Path
+) -> None:
+    """The spec-semantic gate is scoped to the ``spec`` phase only.
+    Completing other phases (e.g. ``scenarios``) must not run the SPEC
+    validators — features routinely amend SPEC after the spec phase
+    closes, and a stale anchor mid-feature must not block phase exit
+    elsewhere in the lifecycle."""
+    repo = tmp_path / "repo"
+    feature = repo / ".forge" / "features" / "2026-05-12-non-spec"
+    feature.mkdir(parents=True)
+    initial = {
+        "feature_id": "2026-05-12-non-spec",
+        "tier": "standard",
+        "current_phase": "scenarios",
+        "phases": {
+            "spec": {"status": "done"},
+            "scenarios": {
+                "status": "in_progress",
+                "started_at": "2026-05-12T10:00:00Z",
+            },
+        },
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    target = feature / "state.json"
+    state.write_state(target, initial, schema_path=schemas_dir / "state.schema.json")
+    # SPEC.md carries a guaranteed-HIGH anchor (path does not exist). The
+    # scenarios-phase exit must succeed regardless.
+    (feature / "SPEC.md").write_text(
+        "# Codebase Anchors\n"
+        "- `src/missing.py:bar`\n"
+        "# Scenarios\n"
+        "Scenario: 1 demo\n"
+        "# Acceptance Criteria\n"
+        "1. crit-1 done\n",
+        encoding="utf-8",
+    )
+
+    result = state.complete_phase(
+        target,
+        phase="scenarios",
+        schema_path=schemas_dir / "state.schema.json",
+        now="2026-05-12T12:00:00Z",
+    )
+
+    assert result["phases"]["scenarios"]["status"] == "done"
+
+
 def test_finish_feature_sets_current_phase_done_without_phases_entry(
     tmp_path: Path, schemas_dir: Path
 ) -> None:

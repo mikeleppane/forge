@@ -189,6 +189,14 @@ def test_full_tier_walk_seeds_and_advances_through_research(tmp_path: Path) -> N
     payload = read_state(state_path, schema_path=SCHEMA_PATH)
     assert payload["refined_idea"].startswith("Bill cards via Stripe")
 
+    # Replace the seeded placeholder SPEC.md with a stub that passes the
+    # spec-semantic gate inside complete_phase("spec"). This smoke test
+    # exercises state-machine plumbing only — SPEC authoring is covered
+    # elsewhere — so the stub provides the minimum the validators accept.
+    (folder / "SPEC.md").write_text(
+        "# Scenarios\nScenario: 1 crit-1 demo\n# Acceptance Criteria\n1. crit-1 done\n",
+        encoding="utf-8",
+    )
     _advance(state_path, done="spec", nxt="domain", expected_next_command="/forge:scenarios")
     _advance(state_path, done="domain", nxt="scenarios", expected_next_command="/forge:plan")
     _advance(state_path, done="scenarios", nxt="plan", expected_next_command="/forge:crucible")

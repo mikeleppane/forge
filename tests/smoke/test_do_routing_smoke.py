@@ -75,6 +75,19 @@ def _state_path(folder: Path) -> Path:
     return folder / "state.json"
 
 
+def _overwrite_spec_with_gate_passing_stub(folder: Path) -> None:
+    """Replace the seeded placeholder SPEC.md with a stub that passes the
+    spec-semantic gate enforced by :func:`tools.state.complete_phase` for the
+    ``spec`` phase. These smoke tests exercise state-machine plumbing only;
+    they are not exercising SPEC authoring, so the stub merely provides the
+    minimum content the validators accept (scenarios mapped to ACs, no anchor
+    section)."""
+    (folder / "SPEC.md").write_text(
+        "# Scenarios\nScenario: 1 crit-1 demo\n# Acceptance Criteria\n1. crit-1 done\n",
+        encoding="utf-8",
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. Focused walk: seed -> spec -> execute -> verify
 # ---------------------------------------------------------------------------
@@ -115,6 +128,7 @@ def test_focused_walk_seed_to_execute(tmp_path: Path) -> None:
     assert next_phase_command(payload) == "/forge:execute"
 
     # spec -> execute boundary.
+    _overwrite_spec_with_gate_passing_stub(folder)
     complete_phase(state_path, "spec", schema_path=SCHEMA_PATH)
     start_phase(state_path, "execute", schema_path=SCHEMA_PATH)
     payload = read_state(state_path, schema_path=SCHEMA_PATH)
@@ -165,6 +179,7 @@ def test_standard_walk_seed_to_plan(tmp_path: Path) -> None:
     assert next_phase_command(payload) == "/forge:scenarios"
 
     # spec -> scenarios boundary.
+    _overwrite_spec_with_gate_passing_stub(folder)
     complete_phase(state_path, "spec", schema_path=SCHEMA_PATH)
     start_phase(state_path, "scenarios", schema_path=SCHEMA_PATH)
     payload = read_state(state_path, schema_path=SCHEMA_PATH)

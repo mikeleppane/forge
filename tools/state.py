@@ -13,6 +13,9 @@ from typing import Any, Final
 
 import jsonschema
 
+from tools._repo_root import discover_repo_root
+from tools.validate.spec_semantic import validate_anchors, validate_scenarios
+
 
 class StateError(RuntimeError):
     """Raised when state.json cannot be read, parsed, or transitioned."""
@@ -372,6 +375,48 @@ def write_state(
     path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
 
 
+def _enforce_spec_semantic_gate(state_path: Path) -> None:
+    """Refuse spec-phase exit when SPEC.md has HIGH/BLOCK semantic findings.
+
+    Runs the same anchor + scenario validators the ``forge-spec`` SKILL prose
+    recommends, so the mechanical state mutation cannot bypass the gate even
+    when an agent skipped the manual `python -m tools.validate --target
+    spec-semantic` step. SPEC.md lives next to ``state.json``; the repo root
+    needed by the anchor validator is discovered via the shared `.forge`
+    walk-up (mirroring the validator CLI's autodiscovery).
+
+    Args:
+        state_path: Path to the feature's ``state.json``.
+
+    Raises:
+        StateError: When any finding has severity ``HIGH`` or ``BLOCK``.
+            The error names the count of blocking findings and the SPEC
+            path.
+
+    Notes:
+        SPEC.md absence is a no-op rather than a refusal: callers that
+        exercise the state machine without a real spec on disk (e.g.
+        fixture-driven plumbing tests, or unusual feature configurations
+        that intentionally defer the file) must remain able to transition.
+        ``validate_health`` is the right surface to flag a missing SPEC.md
+        in a live feature, not this gate.
+    """
+    spec_path = state_path.parent / "SPEC.md"
+    if not spec_path.is_file():
+        return
+    repo_root = discover_repo_root(state_path) or state_path.parent
+    findings = [
+        *validate_scenarios(spec_path),
+        *validate_anchors(spec_path, repo_root=repo_root),
+    ]
+    blocking = [f for f in findings if f.severity in ("BLOCK", "HIGH")]
+    if blocking:
+        raise StateError(
+            f"cannot complete phase 'spec': {len(blocking)} HIGH/BLOCK "
+            f"semantic findings against {spec_path}; resolve them and re-run"
+        )
+
+
 def complete_phase(
     path: Path,
     phase: str,
@@ -426,6 +471,9 @@ def complete_phase(
                 f"cannot complete phase 'review': both review targets must be done; "
                 f"targets_done={targets_done}, required={required}"
             )
+
+    if phase == "spec":
+        _enforce_spec_semantic_gate(path)
 
     payload["phases"][phase]["status"] = "done"
     payload["phases"][phase]["completed_at"] = timestamp

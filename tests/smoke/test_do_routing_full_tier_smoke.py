@@ -78,6 +78,15 @@ def _state_path(folder: Path) -> Path:
     return folder / "state.json"
 
 
+def _overwrite_spec_with_gate_passing_stub(folder: Path) -> None:
+    """Replace the seeded placeholder SPEC.md with a stub that satisfies the
+    spec-semantic gate inside :func:`tools.state.complete_phase`."""
+    (folder / "SPEC.md").write_text(
+        "# Scenarios\nScenario: 1 crit-1 demo\n# Acceptance Criteria\n1. crit-1 done\n",
+        encoding="utf-8",
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. Full-tier seed produces the refine phase (not spec)
 # ---------------------------------------------------------------------------
@@ -190,6 +199,7 @@ def test_full_tier_walk_seed_to_domain_via_state_helpers(tmp_path: Path) -> None
     assert next_phase_command(payload) == "/forge:domain"
 
     # Spec → domain boundary.
+    _overwrite_spec_with_gate_passing_stub(folder)
     complete_phase(state_path, "spec", schema_path=SCHEMA_PATH)
     start_phase(state_path, "domain", schema_path=SCHEMA_PATH)
 

@@ -168,7 +168,10 @@ def test_full_tier_round_cap_auto_mode_logs_deviation_and_advances(tmp_path: Pat
         )
 
     complete_phase(state_path, "refine", schema_path=SCHEMA_PATH)
-    start_phase(state_path, "spec", schema_path=SCHEMA_PATH)
+    # Refine round-cap deviation path jumps past ``research``; the deviation
+    # entry above documents why. ``force=True`` makes the phase-machine guard
+    # acknowledge the deliberate skip rather than refuse the transit.
+    start_phase(state_path, "spec", schema_path=SCHEMA_PATH, force=True)
 
     payload = read_state(state_path, schema_path=SCHEMA_PATH)
     assert payload["current_phase"] == "spec"
@@ -216,7 +219,11 @@ def test_increment_refuses_when_phase_advanced(tmp_path: Path) -> None:
     increment_refine_attempts(state_path, schema_path=SCHEMA_PATH)
     record_refined_idea(state_path, refined="Refined.", schema_path=SCHEMA_PATH)
     complete_phase(state_path, "refine", schema_path=SCHEMA_PATH)
-    start_phase(state_path, "spec", schema_path=SCHEMA_PATH)
+    # Fixture setup jumps the lifecycle to land at the spec slot so the
+    # assertion below exercises increment_refine_attempts on a feature that
+    # has already advanced past refine. ``force=True`` is the documented
+    # bypass for setup-only phase jumps.
+    start_phase(state_path, "spec", schema_path=SCHEMA_PATH, force=True)
 
     with pytest.raises(StateError, match="refine"):
         increment_refine_attempts(state_path, schema_path=SCHEMA_PATH)

@@ -402,7 +402,13 @@ def test_start_phase_marks_next_in_progress(tmp_path: Path, schemas_dir: Path) -
 
 
 def test_start_phase_resets_existing_entry(tmp_path: Path, schemas_dir: Path) -> None:
-    """Re-entering a phase must replace the entry, not preserve stale fields."""
+    """Re-entering a done phase via force=True must replace the entry, not preserve stale fields.
+
+    Re-starting a phase that already finished is a recovery path, not a
+    normal lifecycle transition. Production callers go through
+    tools.recovery.recover_force_start_phase to land an audited ADR;
+    this test pins the bare reset semantics that recovery relies on.
+    """
     target = tmp_path / "state.json"
     initial = {
         "feature_id": "2026-05-03-demo-feature",
@@ -428,6 +434,7 @@ def test_start_phase_resets_existing_entry(tmp_path: Path, schemas_dir: Path) ->
         phase="execute",
         schema_path=schemas_dir / "state.schema.json",
         now="2026-05-03T13:00:00Z",
+        force=True,
     )
 
     assert result["phases"]["execute"] == {

@@ -46,6 +46,23 @@ class LockingNotSupportedError(StateError):
     """
 
 
+class PhasePreconditionError(StateError):
+    """Raised when ``start_phase`` is called without its lifecycle precondition.
+
+    Two flavors:
+
+    1. The prior phase in the feature's canonical phase list is not yet
+       ``done``. Caller jumped ahead in the lifecycle.
+    2. The target phase is already ``done``. Caller asked for a phase
+       that has already finished.
+
+    Both flavors are bypassable via ``start_phase(..., force=True)``, but
+    callers wanting an audited bypass should use
+    :func:`tools.recovery.recover_force_start_phase` so the decision is
+    written into ``decisions.md`` instead of vanishing.
+    """
+
+
 # Thread-local set of state.json paths currently held by this process.
 # ``state_lock`` is non-re-entrant: a nested acquisition against any path
 # already in this set raises ``RuntimeError``. Per-thread storage avoids
@@ -841,14 +858,36 @@ def start_phase(
     phase: str,
     schema_path: Path | None = None,
     now: str | None = None,
+    *,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Set `current_phase = phase` and create/replace its phases entry as in_progress.
+
+    Lifecycle precondition: ``phase`` must be the next legitimate slot
+    in the feature's canonical phase list. Two refusals fire as
+    :class:`PhasePreconditionError`:
+
+    1. The prior phase in :func:`get_phase_list` is not yet ``done``.
+    2. The target phase already exists with ``status == "done"``.
+
+    Idempotent re-entry: if the target phase is already in ``payload[phases]``
+    with ``status in {"pending", "in_progress"}``, the call succeeds and
+    re-stamps ``started_at``. This matches the resume semantics that the
+    SKILL prose advertises for review-target carry-over.
+
+    Recovery: ``force=True`` bypasses both precondition checks. Pass
+    ``force=True`` directly only from short-lived scripts; long-lived
+    recovery should go through :func:`tools.recovery.recover_force_start_phase`
+    which appends an audited ADR to ``decisions.md``.
 
     Args:
         path: state.json path.
         phase: Lifecycle phase name to start.
         schema_path: Optional schema for read+write validation.
         now: Optional ISO 8601 timestamp; defaults to UTC now.
+        force: When ``True``, skip the precondition check. The caller is
+            responsible for the audit trail; ``start_phase`` writes
+            nothing to ``decisions.md``.
 
     Returns:
         Updated state payload.
@@ -856,6 +895,8 @@ def start_phase(
     Raises:
         StateError: Unknown phase, phase not allowed on the seeded
             ``state.json.tier``, or schema failure.
+        PhasePreconditionError: Prior phase is not done, or target phase
+            already done, and ``force`` was not set.
     """
     if phase not in VALID_LIFECYCLE_PHASES:
         raise StateError(f"unknown phase '{phase}'; must be one of {VALID_LIFECYCLE_PHASES}")
@@ -876,6 +917,9 @@ def start_phase(
         if "phases" not in payload or not isinstance(payload["phases"], dict):
             raise StateError("state.json is missing the required `phases` mapping")
 
+        if not force:
+            _enforce_phase_precondition(payload, phase)
+
         new_block: dict[str, Any] = {"status": "in_progress", "started_at": timestamp}
         if phase == "review":
             prior = payload["phases"].get("review")
@@ -888,6 +932,90 @@ def start_phase(
 
         write_state(path, payload, schema_path=schema_path)
         return payload
+
+
+def _enforce_phase_precondition(payload: dict[str, Any], phase: str) -> None:
+    """Refuse to advance to ``phase`` when the lifecycle precondition is unmet.
+
+    Two refusals raise :class:`PhasePreconditionError`:
+
+    1. ``phases[phase].status == "done"``: caller asked for a phase that
+       has already finished. Idempotent re-entry only covers
+       ``pending`` / ``in_progress``.
+    2. The phase immediately preceding ``phase`` in the canonical phase
+       list (per :func:`get_phase_list`) is not yet ``done``. The first
+       phase has no prior and always passes.
+
+    Review-target pivot: the canonical list places ``execute`` right
+    after ``review``, but the SKILL prose runs ``review --target plan``
+    BEFORE execute and ``review --target code`` AFTER execute. The
+    ``review`` phase status therefore stays ``in_progress`` across the
+    execute slot. This helper accepts that pivot when the prior
+    ``review`` block records ``targets_done`` containing ``"plan"``.
+
+    Unknown phase lists (legacy state.json without ``routing`` or
+    ``tier``) skip the prior-phase check defensively — the
+    ``_tier_allowed_phases`` guard at the call site already refuses
+    unknown tiers, so this branch only hits artificial fixtures.
+    """
+    existing = payload.get("phases", {}).get(phase)
+    if isinstance(existing, dict) and existing.get("status") == "done":
+        raise PhasePreconditionError(
+            f"cannot start phase {phase!r}: already done. "
+            "Pass force=True to override (use tools.recovery for an audited path)."
+        )
+
+    phase_list = get_phase_list(payload)
+    if not phase_list or phase not in phase_list:
+        return
+
+    idx = phase_list.index(phase)
+    if idx == 0:
+        return
+
+    # Walk back past any phase that the routing layer marked skipped
+    # (e.g. ``research`` on a standard-tier feature that opted out). A
+    # skipped phase has no ``phases[<name>]`` entry to inspect; treat it
+    # as transparent so the precondition lands on the nearest active
+    # prior slot.
+    skipped_phases = _skipped_phase_set(payload)
+    cursor = idx - 1
+    while cursor >= 0 and phase_list[cursor] in skipped_phases:
+        cursor -= 1
+    if cursor < 0:
+        return
+
+    prior = phase_list[cursor]
+    prior_block = payload.get("phases", {}).get(prior)
+
+    # Review-target pivot: execute starts while review is still in_progress,
+    # provided the plan-target pass already completed.
+    if prior == "review" and phase == "execute" and isinstance(prior_block, dict):
+        targets_done = prior_block.get("targets_done", [])
+        if isinstance(targets_done, list) and "plan" in targets_done:
+            return
+
+    prior_status = prior_block.get("status") if isinstance(prior_block, dict) else None
+    if prior_status != "done":
+        raise PhasePreconditionError(
+            f"cannot start phase {phase!r}: prior phase {prior!r} is "
+            f"{prior_status!r}, expected 'done'. "
+            "Pass force=True to override (use tools.recovery for an audited path)."
+        )
+
+
+def _skipped_phase_set(payload: dict[str, Any]) -> frozenset[str]:
+    """Return the set of phase names marked skipped in ``payload``."""
+    skipped = payload.get("skipped")
+    if not isinstance(skipped, list):
+        return frozenset()
+    names: set[str] = set()
+    for entry in skipped:
+        if isinstance(entry, dict):
+            name = entry.get("phase")
+            if isinstance(name, str):
+                names.add(name)
+    return frozenset(names)
 
 
 def finish_feature(

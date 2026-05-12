@@ -242,9 +242,11 @@ def test_full_tier_refined_idea_consumed_by_spec_phase(tmp_path: Path) -> None:
     assert payload["refined_idea"] == refined_text
 
     # Transit to spec.  ``complete_phase`` + ``start_phase`` must not strip
-    # the field.
+    # the field. ``force=True`` jumps past the ``research`` slot because
+    # this test isolates the refined_idea round-trip; the proper refine →
+    # research → spec walk is exercised by the full-tier pipeline smoke.
     complete_phase(state_path, "refine", schema_path=SCHEMA_PATH)
-    start_phase(state_path, "spec", schema_path=SCHEMA_PATH)
+    start_phase(state_path, "spec", schema_path=SCHEMA_PATH, force=True)
 
     payload = read_state(state_path, schema_path=SCHEMA_PATH)
     assert payload["current_phase"] == "spec"

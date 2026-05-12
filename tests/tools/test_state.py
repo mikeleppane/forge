@@ -1273,6 +1273,41 @@ def test_finish_feature_sets_current_phase_done_without_phases_entry(
     assert "done" not in result["phases"]
 
 
+def test_complete_phase_coerces_string_path(tmp_path: Path, schemas_dir: Path) -> None:
+    """A ``str`` ``path`` must complete the phase identically to the ``Path`` form.
+
+    Agent callers improvising on the call shape pass a ``str`` state.json
+    path; the helper calls ``state_lock(path)`` immediately which invokes
+    ``path.exists()`` and ``path.with_name(...)``, both ``Path`` methods,
+    tripping a cryptic ``AttributeError`` deep inside the lock-acquisition
+    chain when no boundary coercion sits at the entry. The string form must
+    transition the phase identically to the ``Path`` form for the same
+    inputs.
+    """
+    target = tmp_path / "state.json"
+    initial = {
+        "feature_id": "2026-05-12-coerce-demo",
+        "tier": "focused",
+        "current_phase": "spec",
+        "phases": {"spec": {"status": "in_progress", "started_at": "2026-05-12T10:00:00Z"}},
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    schema_path = schemas_dir / "state.schema.json"
+    state.write_state(target, initial, schema_path=schema_path)
+
+    result = state.complete_phase(
+        str(target),
+        phase="spec",
+        schema_path=schema_path,
+        now="2026-05-12T11:30:00Z",
+    )
+
+    assert result["phases"]["spec"]["status"] == "done"
+    assert result["phases"]["spec"]["completed_at"] == "2026-05-12T11:30:00Z"
+
+
 def test_feature_folder_exists_coerces_string_repo_root(tmp_path: Path) -> None:
     """A ``str`` ``repo_root`` must return the same result as the ``Path`` form.
 

@@ -747,7 +747,7 @@ def _enforce_phase_gate(state_path: Path, phase: str) -> None:
 
 
 def complete_phase(
-    path: Path,
+    path: Path | str,
     phase: str,
     schema_path: Path | None = None,
     now: str | None = None,
@@ -759,7 +759,10 @@ def complete_phase(
     changed; call ``start_phase`` next to move forward.
 
     Args:
-        path: state.json path.
+        path: state.json path. A ``str`` is accepted at the entry boundary
+            and coerced to ``Path`` so agent callers that improvise on the
+            call shape do not trip a cryptic ``AttributeError`` deep inside
+            the lock-acquisition chain.
         phase: Lifecycle phase name to complete.
         schema_path: Optional schema for read+write validation.
         now: Optional ISO 8601 timestamp; defaults to UTC now.
@@ -775,6 +778,7 @@ def complete_phase(
     if phase not in VALID_LIFECYCLE_PHASES:
         raise StateError(f"unknown phase '{phase}'; must be one of {VALID_LIFECYCLE_PHASES}")
 
+    path = Path(path)
     with state_lock(path):
         payload = read_state(path, schema_path=schema_path)
         timestamp = now or _utc_now_iso()

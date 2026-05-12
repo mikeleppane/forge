@@ -236,6 +236,82 @@ def test_parse_constitution_text_raises_on_missing_frontmatter() -> None:
         cn.parse_constitution_text("## Article 1 — No frontmatter [SHOULD]\n")
 
 
+def test_article_rule_preserves_inline_backticks(tmp_path: Path) -> None:
+    text = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-07"\n---\n\n'
+        "## Article 1 — Inline rule [SHOULD]\n"
+        "**Rule:** Use `pathlib.Path` not `os.path`.\n"
+        "**Reference:** ref\n"
+        "**Rationale:** Modern Python idiom.\n"
+        "**Exception:** None.\n"
+    )
+    src = tmp_path / "inline_rule.md"
+    src.write_text(text, encoding="utf-8")
+    article = cn.parse_constitution(src)[0]
+    assert article.rule == "Use `pathlib.Path` not `os.path`."
+
+
+def test_article_rationale_preserves_inline_backticks(tmp_path: Path) -> None:
+    text = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-07"\n---\n\n'
+        "## Article 1 — Inline rationale [SHOULD]\n"
+        "**Rule:** Be explicit.\n"
+        "**Reference:** ref\n"
+        "**Rationale:** Because `os.path` is legacy and `pathlib` is modern.\n"
+        "**Exception:** None.\n"
+    )
+    src = tmp_path / "inline_rationale.md"
+    src.write_text(text, encoding="utf-8")
+    article = cn.parse_constitution(src)[0]
+    assert article.rationale == "Because `os.path` is legacy and `pathlib` is modern."
+
+
+def test_article_rule_preserves_fenced_block(tmp_path: Path) -> None:
+    text = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-07"\n---\n\n'
+        "## Article 1 — Fenced rule [SHOULD]\n"
+        "**Rule:** Use the helper below.\n"
+        "```python\n"
+        "atomic_replace(path, body)\n"
+        "```\n"
+        "**Reference:** ref\n"
+        "**Rationale:** safety.\n"
+        "**Exception:** None.\n"
+    )
+    src = tmp_path / "fenced_rule.md"
+    src.write_text(text, encoding="utf-8")
+    article = cn.parse_constitution(src)[0]
+    assert "```python" in article.rule
+    assert "atomic_replace(path, body)" in article.rule
+    assert article.rule.count("```") == 2
+
+
+def test_article_fenced_block_phantom_header_still_ignored(tmp_path: Path) -> None:
+    """`## Article N` inside a fenced block must not register as a real article."""
+    text = (
+        '---\nversion: 0.1.0\ncreated: "2026-05-07"\n---\n\n'
+        "## Article 1 — Real [SHOULD]\n"
+        "**Rule:** Be explicit.\n"
+        "**Reference:** ref\n"
+        "**Rationale:** because.\n"
+        "**Exception:** None.\n"
+        "\n"
+        "Example template:\n"
+        "\n"
+        "```markdown\n"
+        "## Article 99 — Phantom [CRITICAL]\n"
+        "**Rule:** Never trigger this from inside a fence.\n"
+        "**Reference:** —\n"
+        "**Rationale:** —\n"
+        "**Exception:** None.\n"
+        "```\n"
+    )
+    src = tmp_path / "fenced_phantom.md"
+    src.write_text(text, encoding="utf-8")
+    ids = [a.id for a in cn.parse_constitution(src)]
+    assert ids == ["A1"]
+
+
 def test_article_to_budget_dict_preserves_null_optionals() -> None:
     """Articles without Reference/Rationale serialize them as None, not omitted."""
     text = (

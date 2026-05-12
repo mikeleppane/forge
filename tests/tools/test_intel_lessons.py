@@ -309,6 +309,78 @@ def test_parse_ignores_lessons_inside_fenced_code(tmp_path: Path) -> None:
     assert [e.id for e in parsed] == ["L001"]
 
 
+def test_trap_preserves_inline_backticks(tmp_path: Path) -> None:
+    trap = "Calling `state.write()` without lock leaks state.json."
+    body = _file(_entry(trap=trap))
+    path = _write(tmp_path / "lessons.md", body)
+    parsed = lessons.parse(path)
+    assert parsed[0].trap == trap
+
+
+def test_avoidance_preserves_inline_backticks(tmp_path: Path) -> None:
+    avoidance = "Use `atomic_replace()` helper from `tools.constitution_amend`."
+    body = _file(_entry(avoidance=avoidance))
+    path = _write(tmp_path / "lessons.md", body)
+    parsed = lessons.parse(path)
+    assert parsed[0].avoidance == avoidance
+
+
+def test_trap_preserves_fenced_block(tmp_path: Path) -> None:
+    trap_first_line = "Bad pattern below."
+    body = (
+        _HEADER
+        + "## L001 — Fenced trap\n"
+        + "**Captured:** 2026-05-11 from feature x\n"
+        + "**Resolved by:** manual\n"
+        + f"**Trap:** {trap_first_line}\n"
+        + "```python\n"
+        + "state.write(payload)\n"
+        + "```\n"
+        + "**Avoidance:** Use atomic_replace.\n"
+        + "**Tags:** dispatch\n"
+        + "**Severity:** LOW\n"
+        + "**Status:** active\n"
+    )
+    path = _write(tmp_path / "lessons.md", body)
+    parsed = lessons.parse(path)
+    # Continuation lines are concatenated with single spaces; verify every
+    # fenced-block byte (backticks, language tag, code) round-trips into trap.
+    assert "```python" in parsed[0].trap
+    assert "state.write(payload)" in parsed[0].trap
+    assert parsed[0].trap.count("```") == 2
+
+
+def test_fenced_block_phantom_header_still_ignored(tmp_path: Path) -> None:
+    """A `## L042 — fake` inside a fenced block must not register as a lesson."""
+    body = (
+        _HEADER
+        + _entry(nid="L001")
+        + "\n"
+        + "Example follows:\n\n"
+        + "```markdown\n"
+        + "## L042 — fake\n"
+        + "**Captured:** 2026-05-11 from feature x\n"
+        + "**Resolved by:** manual\n"
+        + "**Trap:** phantom\n"
+        + "**Avoidance:** phantom\n"
+        + "**Tags:** dispatch\n"
+        + "**Severity:** LOW\n"
+        + "**Status:** active\n"
+        + "```\n"
+    )
+    path = _write(tmp_path / "lessons.md", body)
+    parsed = lessons.parse(path)
+    assert [e.id for e in parsed] == ["L001"]
+
+
+def test_to_budget_dict_passes_trap_verbatim(tmp_path: Path) -> None:
+    trap = "Calling `state.write()` without lock leaks state.json."
+    body = _file(_entry(trap=trap))
+    path = _write(tmp_path / "lessons.md", body)
+    parsed = lessons.parse(path)
+    assert parsed[0].to_budget_dict()["trap"] == trap
+
+
 # ---------------------------------------------------------------------------
 # parse_text in-memory counterpart
 # ---------------------------------------------------------------------------

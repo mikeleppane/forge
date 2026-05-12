@@ -85,12 +85,12 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA_RE_INSENSITIVE = re.compile(r"^[0-9a-fA-F]{40}$")
 _SUPERSEDED_RE = re.compile(r"^superseded-by:(L\d{3})$")
 
-# Strip fenced + inline code so illustrative ``## L001`` lines inside code
-# blocks cannot register as phantom lessons. Pattern is copied from
-# ``tools.constitution._strip_code_regions`` rather than imported so the two
-# loaders evolve independently.
-_FENCE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+# Detect fenced-code-block delimiters so header scanning can skip lines that
+# live inside a fence (illustrative ``## L042`` examples must not register as
+# phantom lessons). Field bodies are captured from the raw line stream so
+# user-authored inline backticks and fenced code round-trip verbatim into
+# ``Lesson.trap`` / ``Lesson.avoidance``.
+_FENCE_DELIM_RE = re.compile(r"^\s*```")
 
 _DEFAULT_HEADER = '---\nversion: 0.1.0\ncreated: "{created}"\n---\n\n# FORGE Lessons\n\n'
 
@@ -216,20 +216,11 @@ class Lesson:
 # ---------------------------------------------------------------------------
 
 
-def _strip_code_regions(text: str) -> str:
-    """Blank fenced + inline code spans with same-length whitespace.
-
-    Whitespace replacement keeps byte offsets stable so any future
-    line-number reporting matches the original file.
-    """
-    out = _FENCE_BLOCK_RE.sub(lambda m: " " * len(m.group(0)), text)
-    return _INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), out)
-
-
 @dataclass
 class _ParseState:
     current: dict[str, object] | None = None
     active_field: str | None = None
+    in_fence: bool = False
 
 
 def parse(path: Path) -> list[Lesson]:
@@ -260,11 +251,16 @@ def parse_text(text: str) -> list[Lesson]:
 
     Per-block error messages include the 1-based source line of the lesson
     header so authors can navigate to the offending entry directly.
+
+    Header scanning tracks fenced-code-block state so illustrative
+    ``## L042`` lines inside a ```` ``` ```` fence cannot register as
+    phantom lessons. Field bodies (Trap, Avoidance, ...) are captured from
+    the raw line stream so user-authored inline backticks and fenced blocks
+    round-trip verbatim.
     """
-    scrubbed = _strip_code_regions(text)
     state = _ParseState()
     blocks: list[dict[str, object]] = []
-    for line_idx, raw_line in enumerate(scrubbed.splitlines(), start=1):
+    for line_idx, raw_line in enumerate(text.splitlines(), start=1):
         _consume_line(raw_line, state, blocks, line_no=line_idx)
     if state.current is not None:
         blocks.append(state.current)
@@ -274,6 +270,76 @@ def parse_text(text: str) -> list[Lesson]:
     return lessons
 
 
+def _handle_fence(state: _ParseState, line: str) -> bool:
+    """Return True when ``line`` belongs to a fenced-code block.
+
+    Toggles ``state.in_fence`` on each ```` ``` ```` delimiter and routes the
+    raw line into the active field body (verbatim, newline-joined) so the
+    fenced content survives round-trip while header / field detection is
+    bypassed inside the fence.
+    """
+    is_fence_delim = bool(_FENCE_DELIM_RE.match(line))
+    if not state.in_fence and not is_fence_delim:
+        return False
+    if state.current is not None and state.active_field is not None:
+        existing = cast(str, state.current.get(state.active_field, ""))
+        state.current[state.active_field] = f"{existing}\n{line}" if existing else line
+    if is_fence_delim:
+        state.in_fence = not state.in_fence
+    return True
+
+
+def _open_field(field_match: re.Match[str], state: _ParseState) -> None:
+    """Set ``state.active_field`` and seed it from a ``**Marker:** tail`` line.
+
+    Caller has already confirmed an entry block is open. Unknown markers
+    close the active field so stray ``**Foo:**`` lines cannot bleed into
+    Trap / Avoidance bodies.
+    """
+    if state.current is None:
+        return
+    marker = field_match.group(1).lower()
+    if marker not in _FIELD_KEYS:
+        state.active_field = None
+        return
+    internal = _FIELD_RENAME.get(marker, marker)
+    state.active_field = internal
+    state.current[internal] = field_match.group(2).strip()
+
+
+def _open_lesson_block(
+    line: str,
+    state: _ParseState,
+    blocks: list[dict[str, object]],
+    *,
+    line_no: int,
+) -> None:
+    """Close the prior block and open a fresh entry on a ``## L<NNN>`` header."""
+    match = _HEADER_RE.match(line)
+    if not match:
+        raise LessonError(f"line {line_no}: malformed lesson header: {line!r}")
+    lesson_id = match.group(1)
+    if not _ID_RE.match(lesson_id):
+        raise LessonError(
+            f"line {line_no}: malformed lesson id {lesson_id!r}: expected L<NNN> zero-padded"
+        )
+    if state.current is not None:
+        blocks.append(state.current)
+    state.current = {
+        "id": lesson_id,
+        "title": match.group(2).strip(),
+        "captured": "",
+        "resolved_by": "",
+        "trap": "",
+        "avoidance": "",
+        "tags": "",
+        "severity": "",
+        "status": "",
+        "_header_line": line_no,
+    }
+    state.active_field = None
+
+
 def _consume_line(
     line: str,
     state: _ParseState,
@@ -281,30 +347,15 @@ def _consume_line(
     *,
     line_no: int,
 ) -> None:
+    # Track fenced-code-block state so a ``## L042`` line inside a fence
+    # cannot trigger header detection. The fenced content (delimiters and
+    # body lines) is captured verbatim into the active field so callers see
+    # backticks round-trip.
+    if _handle_fence(state, line):
+        return
+
     if line.startswith("## L"):
-        match = _HEADER_RE.match(line)
-        if not match:
-            raise LessonError(f"line {line_no}: malformed lesson header: {line!r}")
-        lesson_id = match.group(1)
-        if not _ID_RE.match(lesson_id):
-            raise LessonError(
-                f"line {line_no}: malformed lesson id {lesson_id!r}: expected L<NNN> zero-padded"
-            )
-        if state.current is not None:
-            blocks.append(state.current)
-        state.current = {
-            "id": lesson_id,
-            "title": match.group(2).strip(),
-            "captured": "",
-            "resolved_by": "",
-            "trap": "",
-            "avoidance": "",
-            "tags": "",
-            "severity": "",
-            "status": "",
-            "_header_line": line_no,
-        }
-        state.active_field = None
+        _open_lesson_block(line, state, blocks, line_no=line_no)
         return
 
     if state.current is None:
@@ -312,13 +363,7 @@ def _consume_line(
 
     field_match = _FIELD_RE.match(line)
     if field_match:
-        marker = field_match.group(1).lower()
-        if marker not in _FIELD_KEYS:
-            state.active_field = None
-            return
-        internal = _FIELD_RENAME.get(marker, marker)
-        state.active_field = internal
-        state.current[internal] = field_match.group(2).strip()
+        _open_field(field_match, state)
         return
 
     if state.active_field is None:

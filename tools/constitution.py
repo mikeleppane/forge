@@ -70,28 +70,14 @@ _FIELD_KEYS = ("rule", "reference", "rationale", "exception")
 # delimiter is missing. Naming the boundary keeps the magic-value lint quiet.
 _FRONTMATTER_PARTS_REQUIRED = 3
 
-# Loader/validator must agree on what counts as an article header. The
-# structural validator (tools.validate._frontmatter._strip_code) blanks
-# fenced + inline code regions before scanning so illustrative quotes
-# inside ```markdown ... ``` cannot trigger phantom-article findings.
-# We mirror the blanking here — keeping byte offsets stable via
-# whitespace replacement so any future line-number reporting matches the
-# original file.
-_FENCE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-
-
-def _strip_code_regions(text: str) -> str:
-    """Replace fenced + inline code spans with same-length whitespace.
-
-    Mirrors ``tools.validate._frontmatter._strip_code`` so the loader sees
-    exactly what the validator sees. Whitespace replacement preserves byte
-    offsets (line counts unchanged); article headers inside fences are
-    therefore invisible to the parser and cannot leak phantom Articles into
-    the dispatch payload.
-    """
-    out = _FENCE_BLOCK_RE.sub(lambda m: " " * len(m.group(0)), text)
-    return _INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), out)
+# Header scanning tracks fenced-code-block delimiters so illustrative
+# ``## Article N`` lines inside ```` ``` ```` blocks cannot register as
+# phantom articles. Field bodies (Rule, Reference, Rationale) are captured
+# from the raw line stream so user-authored inline backticks and fenced
+# blocks round-trip verbatim into ``Article.rule`` / ``Article.rationale``.
+# Inline backticks are never stripped: the phantom-header injection vector
+# is line-anchored at column 0 and cannot fire inside a single-line span.
+_FENCE_DELIM_RE = re.compile(r"^\s*```")
 
 
 def parse_constitution_text(text: str) -> list[Article]:
@@ -126,14 +112,13 @@ def parse_constitution_text(text: str) -> list[Article]:
     except yaml.YAMLError as exc:
         raise ConstitutionError(f"frontmatter parse error: {exc}") from exc
 
-    # Strip fenced + inline code from the body so illustrative `## Article`
-    # examples inside code blocks do not produce phantom Articles. Validator
-    # parity: tools.validate._frontmatter._strip_code applies the same blanking
-    # before its own structural scan.
-    scrubbed_body = _strip_code_regions(body)
+    # Header scanning tracks fenced-code-block state inside ``_consume_line``
+    # so illustrative ``## Article`` examples inside code blocks do not
+    # produce phantom Articles. Field bodies are captured from the raw line
+    # stream so user-authored backticks survive round-trip.
     articles: list[Article] = []
     state = _ParseState()
-    for line in scrubbed_body.splitlines():
+    for line in body.splitlines():
         _consume_line(line, state, articles)
     if state.current is not None:
         articles.append(_block_to_article(state.current))
@@ -169,6 +154,7 @@ class _ParseState:
 
     current: dict[str, Any] | None = None
     active_field: str | None = None
+    in_fence: bool = False
 
 
 def _block_to_article(block: dict[str, Any]) -> Article:
@@ -190,6 +176,39 @@ def _block_to_article(block: dict[str, Any]) -> Article:
     )
 
 
+def _handle_fence(state: _ParseState, line: str) -> bool:
+    """Return True when ``line`` belongs to a fenced-code block.
+
+    Toggles ``state.in_fence`` on each ```` ``` ```` delimiter and routes the
+    raw line into the active field body (verbatim, newline-joined) so the
+    fenced content survives round-trip while header / field detection is
+    bypassed inside the fence.
+    """
+    is_fence_delim = bool(_FENCE_DELIM_RE.match(line))
+    if not state.in_fence and not is_fence_delim:
+        return False
+    _append_to_active_field(state, line)
+    if is_fence_delim:
+        state.in_fence = not state.in_fence
+    return True
+
+
+def _append_to_active_field(state: _ParseState, line: str) -> None:
+    """Append ``line`` to the currently-open field body (verbatim, newline-joined).
+
+    No-op when no article is open or no field is active. Used by the fenced-
+    code branch so ```` ``` ```` delimiters and their interior lines flow into
+    the field body without being parsed as headers or field markers.
+    """
+    if state.current is None or state.active_field is None:
+        return
+    field = state.active_field
+    if field not in _FIELD_KEYS:
+        return
+    existing = state.current[field]
+    state.current[field] = f"{existing}\n{line}" if existing else line
+
+
 def _consume_line(line: str, state: _ParseState, articles: list[Article]) -> None:
     """Apply one body line to the running parse state.
 
@@ -199,7 +218,14 @@ def _consume_line(line: str, state: _ParseState, articles: list[Article]) -> Non
            seeds the value.
         3. Continuation — accumulates onto the active field; blank line
            closes the field so stray paragraphs cannot bleed into Rule.
+
+    Fenced-code-block lines (and their delimiters) bypass header / field
+    detection so a ``## Article 99`` line inside a fence cannot register
+    as a phantom Article. The raw fenced content is preserved in the
+    active field body so user-authored examples round-trip verbatim.
     """
+    if _handle_fence(state, line):
+        return
     if line.startswith("## Article"):
         match = _HEADER_RE.match(line)
         if not match:

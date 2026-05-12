@@ -858,7 +858,7 @@ def _tier_allowed_phases(tier: str) -> frozenset[str]:
 
 
 def start_phase(
-    path: Path,
+    path: Path | str,
     phase: str,
     schema_path: Path | None = None,
     now: str | None = None,
@@ -885,7 +885,10 @@ def start_phase(
     which appends an audited ADR to ``decisions.md``.
 
     Args:
-        path: state.json path.
+        path: state.json path. A ``str`` is accepted at the entry boundary
+            and coerced to ``Path`` so agent callers that improvise on the
+            call shape do not trip a cryptic ``AttributeError`` deep inside
+            the lock-acquisition chain.
         phase: Lifecycle phase name to start.
         schema_path: Optional schema for read+write validation.
         now: Optional ISO 8601 timestamp; defaults to UTC now.
@@ -905,6 +908,7 @@ def start_phase(
     if phase not in VALID_LIFECYCLE_PHASES:
         raise StateError(f"unknown phase '{phase}'; must be one of {VALID_LIFECYCLE_PHASES}")
 
+    path = Path(path)
     with state_lock(path):
         payload = read_state(path, schema_path=schema_path)
         timestamp = now or _utc_now_iso()

@@ -1368,6 +1368,33 @@ def test_feature_folder_exists_coerces_string_repo_root(tmp_path: Path) -> None:
     assert state.feature_folder_exists(str(tmp_path), "2026-05-12-missing") is False
 
 
+def test_write_state_coerces_string_path(tmp_path: Path, schemas_dir: Path) -> None:
+    """A ``str`` ``path`` must write identically to the ``Path`` form.
+
+    Agent callers improvising on the call shape pass a ``str`` state.json
+    destination; ``write_state`` delegates to ``_atomic_write_json`` which
+    calls ``path.parent`` and ``path.parent.mkdir(...)`` — both ``Path``
+    attributes that trip a cryptic ``AttributeError`` deep inside the
+    durable-write chain when no boundary coercion sits at the entry. The
+    string form must persist the same payload as the ``Path`` form.
+    """
+    target = tmp_path / "state.json"
+    payload = {
+        "feature_id": "2026-05-12-coerce-write",
+        "tier": "focused",
+        "current_phase": "spec",
+        "phases": {"spec": {"status": "in_progress", "started_at": "2026-05-12T10:00:00Z"}},
+        "skipped": [],
+        "deviations": [],
+        "commits": [],
+    }
+    schema_path = schemas_dir / "state.schema.json"
+
+    state.write_state(str(target), payload, schema_path=schema_path)
+
+    assert state.read_state(target, schema_path=schema_path) == payload
+
+
 def test_read_state_coerces_string_path(tmp_path: Path, schemas_dir: Path) -> None:
     """A ``str`` ``path`` must read identically to the ``Path`` form.
 

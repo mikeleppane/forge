@@ -487,7 +487,7 @@ VALID_REVIEW_TARGETS = ("plan", "code")
 
 
 def write_state(
-    path: Path,
+    path: Path | str,
     payload: dict[str, Any],
     schema_path: _SchemaPathArg = None,
 ) -> None:
@@ -496,7 +496,10 @@ def write_state(
     On schema failure, no file is written.
 
     Args:
-        path: Destination file.
+        path: Destination file. A ``str`` is accepted at the entry boundary
+            and coerced to ``Path`` so agent callers that improvise on the
+            call shape do not trip a cryptic ``AttributeError`` deep inside
+            the durable-write chain.
         payload: State payload.
         schema_path: Three-mode schema selector.
 
@@ -511,6 +514,7 @@ def write_state(
     Raises:
         StateError: Validation failed; file not written.
     """
+    path = Path(path)
     effective_schema = _resolve_schema_path(path, schema_path)
     if effective_schema is not None:
         schema = json.loads(effective_schema.read_text(encoding="utf-8"))

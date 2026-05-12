@@ -118,6 +118,8 @@ The `/forge:*` slash commands light up once the plugin is loaded. Verify with `/
 
 A formal `claude plugins install …` path is on the roadmap.
 
+**Plugin iteration.** When you edit FORGE source in a checkout that backs a local-directory marketplace, Claude Code caches the plugin under `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` and does not auto-refresh on source edits without a version bump. Run `make plugin-refresh` from the FORGE repo to rebuild the cache (it tries `claude plugin update`, then falls back to a clean uninstall + reinstall). Restart your Claude Code session afterwards so the new code is loaded.
+
 ---
 
 ## What it is

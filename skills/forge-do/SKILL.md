@@ -136,6 +136,26 @@ and dispatches to `/forge:spec`. Standard without `--research` seeds
    and is passed verbatim to `seed_routed_feature` as `final_tier=`.
 8. **Seed via routing helper.** Call
    `tools.routing.seed_routed_feature(repo_root, idea=<idea>, final_tier=<tier>, proposed_tier=<llm_tier>, rationale=<one_sentence>, constitution_present=<bool>, feature_slug=<chosen_slug_or_None>, research_opt_in=<bool>)`.
+
+   Canonical invocation — copy verbatim and substitute the bracketed
+   values resolved by steps 1-7. Do not improvise alternate callables;
+   `seed_routed_feature` is the single post-confirm entry-point.
+
+   ```python
+   from tools.routing import seed_routed_feature
+
+   feature_folder = seed_routed_feature(
+       repo_root,
+       idea=<idea>,
+       final_tier=<tier>,
+       proposed_tier=<llm_tier>,
+       rationale=<one_sentence>,
+       constitution_present=<bool>,
+       feature_slug=<chosen_slug_or_None>,
+       research_opt_in=<bool>,
+   )
+   ```
+
    When step 4 took the suffix-disambig branch, pass the chosen
    disambiguated slug as `feature_slug=` — the helper uses it verbatim
    for `feature_id` while `idea` is persisted into `routing.idea`

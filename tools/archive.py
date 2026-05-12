@@ -1264,7 +1264,7 @@ def _preflight_merge(
 
 
 def merge_delta_proposal(
-    repo_root: Path,
+    repo_root: Path | str,
     change_id: str,
     capability: str,
     pre_archive_hook: Callable[[Path], None] | None = None,
@@ -1300,7 +1300,11 @@ def merge_delta_proposal(
            restore canonical + proposal.md; clean partial archive; re-raise.
 
     Args:
-        repo_root: Repository root containing the ``.forge/`` tree.
+        repo_root: Repository root containing the ``.forge/`` tree. A ``str``
+            is accepted at the entry boundary and coerced to ``Path`` so
+            agent callers that improvise on the call shape do not trip a
+            cryptic ``TypeError`` on the first ``/`` operator inside the
+            lock-path math.
         change_id: Change folder name (YYYY-MM-DD-slug form, schema-aligned slug).
         capability: Capability slug (lowercase letters, digits, hyphens).
         pre_archive_hook: Optional callback run after merged-body validation and
@@ -1339,6 +1343,7 @@ def merge_delta_proposal(
         ``fcntl`` import is deferred to keep the rest of ``tools.archive``
         importable on Windows.
     """
+    repo_root = Path(repo_root)
     # Validate slugs FIRST — before any path math touches user-controlled
     # change_id / capability.  Joining an unvalidated slug into a Path is the
     # documented anti-pattern (coding-guidance-python "First-tier bug-causers");

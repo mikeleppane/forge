@@ -167,6 +167,18 @@ def test_invalid_capability_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_merge_delta_proposal_coerces_string_repo_root(tmp_path: Path) -> None:
+    """Boundary coercion: a string repo_root must not trip ``TypeError``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers that pass a string for an annotated ``Path`` parameter must
+    not crash four frames deep on ``str / ".forge" / ...``; instead the
+    documented "proposal not found" preflight raise should fire.
+    """
+    with pytest.raises(ArchiveError, match="proposal"):
+        merge_delta_proposal(str(tmp_path), "2026-05-08-add-criterion", "my-cap")
+
+
 def test_proposal_missing_raises(tmp_path: Path) -> None:
     """proposal.md does not exist → raises without creating any snapshot."""
     _make_canonical(tmp_path, "my-cap")

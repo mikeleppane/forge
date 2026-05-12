@@ -18,10 +18,12 @@ from typing import Any, Final
 
 import jsonschema
 
-if sys.platform != "win32":
+if sys.platform == "win32":  # pragma: no cover - platform-conditional
+    import msvcrt
+
+    _LOCK_BYTES: Final[int] = 0x7FFFFFFF
+else:
     import fcntl
-else:  # pragma: no cover - platform-conditional
-    fcntl = None  # type: ignore[assignment]
 
 from tools._repo_root import discover_repo_root
 from tools.validate._finding import Finding
@@ -38,9 +40,9 @@ class StateError(RuntimeError):
 class LockingNotSupportedError(StateError):
     """Raised when ``state_lock`` cannot acquire on the current platform.
 
-    Native Win32 is the documented case: ``fcntl`` is POSIX-only and the
-    locking contract refuses to silently no-op. WSL is the supported
-    workaround.
+    Defensive: covers exotic platforms (not POSIX, not Win32) where
+    neither ``fcntl.flock`` nor ``msvcrt.locking`` is available. Linux,
+    macOS, WSL, and native Windows are all supported and do not raise.
     """
 
 
@@ -60,16 +62,47 @@ def _held_lock_paths() -> set[str]:
     return holdings
 
 
+def _acquire_exclusive(fd: int) -> None:
+    """Acquire a cross-platform exclusive lock on ``fd``.
+
+    POSIX path uses ``fcntl.flock(LOCK_EX)`` — true blocking.
+    Win32 path uses ``msvcrt.locking(LK_LOCK, _LOCK_BYTES)`` which
+    retries 10 times at 1-second intervals before raising ``OSError``;
+    that ceiling matches typical state-mutation runtimes (well under a
+    second) and surfaces a real deadlock instead of hanging forever.
+    """
+    if sys.platform == "win32":  # pragma: no cover - platform-conditional
+        msvcrt.locking(fd, msvcrt.LK_LOCK, _LOCK_BYTES)
+    elif sys.platform.startswith(("linux", "darwin", "freebsd", "openbsd", "netbsd")):
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    else:  # pragma: no cover - exotic platforms
+        raise LockingNotSupportedError(
+            f"state_lock has no implementation for sys.platform={sys.platform!r}; "
+            "supported: linux, darwin, win32, BSDs."
+        )
+
+
+def _release_exclusive(fd: int) -> None:
+    """Release the lock acquired by :func:`_acquire_exclusive`."""
+    if sys.platform == "win32":  # pragma: no cover - platform-conditional
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, _LOCK_BYTES)
+    elif sys.platform.startswith(("linux", "darwin", "freebsd", "openbsd", "netbsd")):
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
 @contextmanager
 def state_lock(state_path: Path) -> Generator[None]:
     """Hold an exclusive advisory lock on ``<state_path>.lock`` for the body.
 
     Serializes read-modify-write helpers in this module so concurrent
-    callers cannot overwrite each other's audit entries. Mirrors the
-    ``fcntl.LOCK_EX`` pattern used in ``tools.intel.lessons.append``.
+    callers cannot overwrite each other's audit entries.
+
+    Cross-platform: POSIX uses ``fcntl.flock(LOCK_EX)``; native Win32
+    uses ``msvcrt.locking(LK_LOCK)``. The sidecar lockfile is opened in
+    binary write mode so both syscalls accept the descriptor.
 
     Non-re-entrant: nested acquisition in the same thread raises
-    ``RuntimeError``. Native Win32 raises
+    ``RuntimeError``. Exotic platforms (not POSIX, not Win32) raise
     :class:`LockingNotSupportedError`.
 
     Args:
@@ -80,16 +113,11 @@ def state_lock(state_path: Path) -> Generator[None]:
         ``None`` once the lock is held.
 
     Raises:
-        LockingNotSupportedError: native Win32 (``sys.platform == "win32"``).
+        LockingNotSupportedError: platform is neither POSIX nor Win32.
         RuntimeError: nested acquisition in the same thread.
-        OSError: lockfile cannot be created or flock syscall failed.
+        OSError: lockfile cannot be created or the locking syscall
+            failed (Win32 surfaces a deadlock after ~10 seconds).
     """
-    if sys.platform == "win32":
-        raise LockingNotSupportedError(
-            "tools.state.state_lock is not supported on native Win32; "
-            "use WSL on Windows hosts (msvcrt.locking is intentionally not wired)."
-        )
-
     key = str(state_path.resolve()) if state_path.exists() else str(state_path)
     holdings = _held_lock_paths()
     if key in holdings:
@@ -100,15 +128,15 @@ def state_lock(state_path: Path) -> Generator[None]:
 
     lock_path = state_path.with_name(state_path.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_fh = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115, PTH123
+    lock_fh = open(lock_path, "wb")  # noqa: SIM115, PTH123
     try:
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        _acquire_exclusive(lock_fh.fileno())
         holdings.add(key)
         try:
             yield
         finally:
             holdings.discard(key)
-            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            _release_exclusive(lock_fh.fileno())
     finally:
         lock_fh.close()
 

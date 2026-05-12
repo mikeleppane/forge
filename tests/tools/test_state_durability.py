@@ -21,7 +21,7 @@ import re
 from datetime import date
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -128,16 +128,34 @@ def test_state_lock_is_non_reentrant(tmp_path: Path) -> None:
         pytest.fail("nested state_lock acquisition should have raised")
 
 
-def test_state_lock_refuses_on_native_win32(tmp_path: Path) -> None:
+def test_state_lock_refuses_on_unknown_platform(tmp_path: Path) -> None:
+    """Non-POSIX, non-Win32 platforms raise LockingNotSupportedError."""
     folder = _seed_feature(tmp_path)
     sp = _state_path(folder)
 
     with (
-        patch("tools.state.sys.platform", "win32"),
-        pytest.raises(state.LockingNotSupportedError, match="WSL"),
+        patch("tools.state.sys.platform", "haiku"),
+        pytest.raises(state.LockingNotSupportedError, match="haiku"),
         state.state_lock(sp),
     ):
-        pytest.fail("state_lock should refuse on native win32")
+        pytest.fail("state_lock should refuse on unknown platforms")
+
+
+def test_state_lock_win32_path_dispatches_to_msvcrt() -> None:
+    """Pin the Win32 dispatch shape without actually importing msvcrt on Linux CI."""
+    fake_msvcrt = MagicMock()
+    fake_msvcrt.LK_LOCK = 1
+    fake_msvcrt.LK_UNLCK = 0
+
+    with (
+        patch("tools.state.sys.platform", "win32"),
+        patch.dict(state.__dict__, {"msvcrt": fake_msvcrt, "_LOCK_BYTES": 0x7FFFFFFF}),
+    ):
+        state._acquire_exclusive(123)
+        state._release_exclusive(123)
+
+    fake_msvcrt.locking.assert_any_call(123, 1, 0x7FFFFFFF)
+    fake_msvcrt.locking.assert_any_call(123, 0, 0x7FFFFFFF)
 
 
 def test_locking_not_supported_error_subclasses_state_error() -> None:

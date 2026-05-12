@@ -682,17 +682,15 @@ def test_parse_accepts_exactly_1000_char_field(tmp_path: Path) -> None:
 def test_append_refuses_concurrent_writer_under_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hold the sidecar lock externally; the second appender must refuse loudly.
-
-    Skipped when ``fcntl`` is unavailable (Windows) — the no-fcntl fallback
-    relies on a different race-narrow check exercised by the next test.
-    """
-    if lessons.fcntl is None:
-        pytest.skip("fcntl unavailable on this platform")
+    """Hold the sidecar lock externally; the second appender must refuse loudly."""
     lock_path = tmp_path / ".forge" / "intel" / "lessons.md.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    held_fh = lock_path.open("w")
-    lessons.fcntl.flock(held_fh, lessons.fcntl.LOCK_EX | lessons.fcntl.LOCK_NB)
+    held_fh = lock_path.open("wb")
+    try:
+        lessons._try_lock_nonblocking(held_fh.fileno())
+    except lessons._LessonLockContentionError:
+        held_fh.close()
+        pytest.fail("test setup could not acquire the sidecar lock on a fresh fixture")
     try:
         draft = _make_lesson(id="L001")
         with pytest.raises(lessons.LessonError, match="another lesson append is in flight"):
@@ -763,10 +761,11 @@ def test_append_post_check_refuses_when_slot_was_filled_concurrently(
         return "L002"  # post-check sees a concurrent writer took L001
 
     monkeypatch.setattr(lessons, "next_id", drifting_next_id)
-    # Disable fcntl so the post-check is the only safety net firing.
-    monkeypatch.setattr(lessons, "fcntl", None)
     # Stop the real atomic_replace from running — we only care that the
-    # post-check raises before it would have been called.
+    # post-check raises before it would have been called. The advisory lock
+    # itself protects against the simultaneous-writer race in production;
+    # this test isolates the drift-detection guard as a defensive belt-and-
+    # braces that fires even when something subverts the lock.
     monkeypatch.setattr(
         lessons,
         "atomic_replace",

@@ -8,28 +8,60 @@ modules can evolve separately.
 
 from __future__ import annotations
 
+import contextlib
 import re
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from types import ModuleType
 from typing import Final, Literal, cast
 
 from tools._relevance import RelevanceError, RelevanceRule, score_and_trim
 from tools.constitution import tokenize
 from tools.constitution_amend import atomic_replace
 
-# fcntl is POSIX-only. Skip the advisory lock when unavailable (Windows) — the
-# rest of the module works regardless; we fall back to a read-and-recheck race
-# narrow at the append call site.
-fcntl: ModuleType | None
-try:
-    import fcntl as _fcntl_mod
+# Platform-conditional non-blocking exclusive lock. POSIX uses
+# ``fcntl.flock(LOCK_EX | LOCK_NB)`` (raises BlockingIOError on contention).
+# Win32 uses ``msvcrt.locking(LK_NBLCK)`` (raises OSError on contention).
+# The append site catches both shapes so contention surfaces uniformly as a
+# ``LessonError`` regardless of host.
+if sys.platform == "win32":  # pragma: no cover - platform-conditional
+    import msvcrt
 
-    fcntl = _fcntl_mod
-except ModuleNotFoundError:  # pragma: no cover - non-POSIX (Windows)
-    fcntl = None
+    _LESSONS_LOCK_BYTES: Final[int] = 0x7FFFFFFF
+else:
+    import fcntl
+
+
+class _LessonLockContentionError(Exception):
+    """Raised by ``_try_lock_nonblocking`` when another writer holds the lock."""
+
+
+def _try_lock_nonblocking(fd: int) -> None:
+    """Acquire an exclusive non-blocking advisory lock on ``fd``.
+
+    Raises :class:`_LessonLockContentionError` if another writer holds the lock.
+    """
+    if sys.platform == "win32":  # pragma: no cover - platform-conditional
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, _LESSONS_LOCK_BYTES)
+        except OSError as exc:
+            raise _LessonLockContentionError from exc
+    else:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise _LessonLockContentionError from exc
+
+
+def _release_lock(fd: int) -> None:
+    """Release the lock acquired by :func:`_try_lock_nonblocking`."""
+    if sys.platform == "win32":  # pragma: no cover - platform-conditional
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, _LESSONS_LOCK_BYTES)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
 
 _TITLE_MAX_LEN: Final[int] = 80
 _TITLE_TRUNCATE_AT: Final[int] = 77
@@ -612,36 +644,34 @@ def append(repo_root: Path, draft: Lesson, *, today: date | None = None) -> Path
     is independent of ``today``.
 
     Concurrency:
-        Holds an advisory ``fcntl.LOCK_EX | LOCK_NB`` on a sidecar
+        Holds an advisory exclusive non-blocking lock on a sidecar
         ``.forge/intel/lessons.md.lock`` for the duration of the call so two
         concurrent appenders cannot both compute the same :func:`next_id` and
-        silently overwrite each other's lesson. The lock is opt-in: when
-        ``fcntl`` is unavailable (Windows), a deliberate single-author retry is
-        substituted — :func:`next_id` is re-derived just before
-        :func:`atomic_replace` and the call refuses with :class:`LessonError`
-        on slot drift instead of clobbering. Either path turns a silent data
-        loss into a loud failure the caller can retry.
+        silently overwrite each other's lesson. POSIX uses
+        ``fcntl.flock(LOCK_EX | LOCK_NB)``; Win32 uses
+        ``msvcrt.locking(LK_NBLCK)``. On contention either path raises
+        :class:`LessonError` so the caller retries instead of clobbering.
+        A defensive post-lock re-derivation of :func:`next_id` covers the
+        narrow window between body build and rename.
     """
     today = today or date.today()
     path = _lessons_path(repo_root)
     lock_path = path.with_suffix(path.suffix + ".lock")
-    # Touch the lockfile so flock has something to attach to even on a fresh
-    # repo where lessons.md itself does not exist yet. The lockfile is a
-    # sidecar artefact owned by this writer; safe to create unconditionally.
+    # Touch the lockfile so the lock syscall has something to attach to even
+    # on a fresh repo where lessons.md itself does not exist yet. The
+    # lockfile is a sidecar artefact owned by this writer; safe to create
+    # unconditionally. Binary mode keeps msvcrt.locking happy on Win32.
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_fh = None
+    lock_fh = lock_path.open("wb")
+    lock_acquired = False
     try:
-        if fcntl is not None:
-            lock_fh = lock_path.open("w")
-            try:
-                fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                lock_fh.close()
-                lock_fh = None
-                raise LessonError(
-                    "another lesson append is in flight; retry after the "
-                    "concurrent writer completes"
-                ) from exc
+        try:
+            _try_lock_nonblocking(lock_fh.fileno())
+            lock_acquired = True
+        except _LessonLockContentionError as exc:
+            raise LessonError(
+                "another lesson append is in flight; retry after the concurrent writer completes"
+            ) from exc
 
         expected = next_id(repo_root)
         if draft.id != expected:
@@ -661,11 +691,11 @@ def append(repo_root: Path, draft: Lesson, *, today: date | None = None) -> Path
         # Round-trip validation: ensure the merged body still parses cleanly.
         parse_text(new_text)
 
-        # Race narrow for the no-fcntl fallback path. Re-derive next_id once
-        # more between the body build and the rename; on slot drift refuse
-        # to clobber. Under fcntl this check is a defensive belt-and-braces
-        # — the exclusive lock already guarantees no concurrent writer
-        # advanced the file.
+        # Defensive belt-and-braces re-check. The exclusive lock above
+        # already guarantees no concurrent writer advanced the file, but
+        # re-derive next_id once more between the body build and the rename
+        # so a future refactor that loosens the lock cannot silently
+        # introduce slot clobbering.
         post_expected = next_id(repo_root)
         if post_expected != expected:
             raise LessonError(
@@ -677,8 +707,10 @@ def append(repo_root: Path, draft: Lesson, *, today: date | None = None) -> Path
         atomic_replace(path, new_text)
         return path
     finally:
-        if lock_fh is not None:
-            lock_fh.close()
+        if lock_acquired:
+            with contextlib.suppress(OSError, ValueError):
+                _release_lock(lock_fh.fileno())
+        lock_fh.close()
 
 
 def _append_to_body(prior_text: str, draft: Lesson) -> str:

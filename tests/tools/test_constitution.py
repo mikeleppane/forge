@@ -356,3 +356,19 @@ def test_article_to_budget_dict_preserves_null_optionals() -> None:
     payload = articles[0].to_budget_dict()
     assert payload["reference"] is None
     assert payload["rationale"] is None
+
+
+def test_load_and_filter_coerces_string_repo_root(tmp_path: Path) -> None:
+    """Boundary coercion: a string repo_root must not trip ``AttributeError``.
+
+    Mirrors the pattern locked into ``tools.bdd_detect.detect`` — agent
+    callers that improvise the call shape and pass a string for an
+    annotated ``Path`` parameter must reach a meaningful result, not a
+    cryptic ``str / ".forge"`` operator failure.
+    """
+    # No CONSTITUTION.md present — the helper's documented empty-pair
+    # branch fires after the boundary coercion runs.
+    kept, dropped = cn.load_and_filter(str(tmp_path))
+
+    assert kept == []
+    assert dropped == []

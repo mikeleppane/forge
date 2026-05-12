@@ -454,7 +454,7 @@ def filter_articles(
 
 
 def load_and_filter(
-    repo_root: Path,
+    repo_root: Path | str,
     *,
     idea_text: str = "",
     files_in_scope: Iterable[Path] = (),
@@ -464,7 +464,10 @@ def load_and_filter(
     Returns ``([], [])`` when ``.forge/CONSTITUTION.md`` is absent.
 
     Args:
-        repo_root: Repository root containing ``.forge/CONSTITUTION.md``.
+        repo_root: Repository root containing ``.forge/CONSTITUTION.md``. A
+            ``str`` is accepted at the entry boundary and coerced to ``Path``
+            so agent callers that improvise on the call shape do not trip a
+            cryptic ``TypeError`` on the first ``/`` operator.
         idea_text: Free-form idea / spec intent text fed into the scope
             keyword extractor.
         files_in_scope: Paths to include as scope signals.
@@ -473,6 +476,7 @@ def load_and_filter(
         Tuple of (kept_articles, dropped_article_ids). Empty pair when the
         Constitution file does not exist.
     """
+    repo_root = Path(repo_root)
     constitution_path = repo_root / ".forge" / "CONSTITUTION.md"
     if not constitution_path.exists():
         return [], []

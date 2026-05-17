@@ -4,11 +4,11 @@
 .DEFAULT_GOAL := help
 
 VENV   := .venv
-PY     := $(VENV)/bin/python
+PY     ?= $(VENV)/bin/python
 PIP    := $(PY) -m pip
-RUFF   := $(VENV)/bin/ruff
-MYPY   := $(VENV)/bin/mypy
-PYTEST := $(VENV)/bin/pytest
+RUFF   ?= $(VENV)/bin/ruff
+MYPY   ?= $(VENV)/bin/mypy
+PYTEST ?= $(VENV)/bin/pytest
 
 # PyPI override — corp default index requires auth; use public PyPI.
 PIP_INDEX := --index-url https://pypi.org/simple/

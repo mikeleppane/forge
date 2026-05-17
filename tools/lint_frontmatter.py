@@ -5,13 +5,20 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import re
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
 import jsonschema
 import yaml
+
+from tools.migrations import v1_noop
+from tools.migrations.registry import REGISTRY
+
+_SCHEMA_VERSION_ANCHORS = v1_noop.__name__
 
 
 class FrontmatterError(RuntimeError):
@@ -19,6 +26,8 @@ class FrontmatterError(RuntimeError):
 
 
 _FENCE = "---"
+_SCHEMA_VERSION_REQUIRED_ENV = "FORGE_SCHEMA_VERSION_REQUIRED"
+_FRONTMATTER_SCHEMA_SUFFIX = "-frontmatter.schema.json"
 
 
 def _coerce_dates_to_iso(value: Any) -> Any:
@@ -121,6 +130,51 @@ def _description_quality_errors(path: Path, description: str) -> list[str]:
     return errors
 
 
+def _file_kind_from_schema(schema_path: Path) -> str:
+    name = schema_path.name
+    if name.endswith(_FRONTMATTER_SCHEMA_SUFFIX):
+        return name.removesuffix(_FRONTMATTER_SCHEMA_SUFFIX)
+    return name.removesuffix(".schema.json")
+
+
+def _latest_registered_schema_version(file_kind: str) -> int | None:
+    versions = [
+        version
+        for migration in REGISTRY.values()
+        if migration.file_kind == file_kind
+        for version in (migration.from_version, migration.to_version)
+    ]
+    if not versions:
+        return None
+    return max(versions)
+
+
+def _schema_version_error(path: Path, payload: dict[str, Any], file_kind: str) -> str | None:
+    if "schema_version" not in payload:
+        message = (
+            f"{path}: schema_version missing (will be required in Phase B); "
+            "run 'forge-state migrate' to add it"
+        )
+        if os.environ.get(_SCHEMA_VERSION_REQUIRED_ENV) == "1":
+            return message
+        warnings.warn(message, category=DeprecationWarning, stacklevel=3)
+        return None
+
+    version = payload["schema_version"]
+    if isinstance(version, bool) or not isinstance(version, int):
+        return None
+
+    latest_version = _latest_registered_schema_version(file_kind)
+    if latest_version is None:
+        return f"{path}: schema_version {version} is newer than latest registered version 0 for {file_kind}"
+    if version > latest_version:
+        return (
+            f"{path}: schema_version {version} is newer than latest registered version "
+            f"{latest_version} for {file_kind}"
+        )
+    return None
+
+
 def validate_file(path: Path, schema_path: Path) -> list[str]:
     """Validate a single markdown file's frontmatter against schema + quality bar.
 
@@ -138,6 +192,10 @@ def validate_file(path: Path, schema_path: Path) -> list[str]:
 
     if fm is None:
         return [f"{path}: missing frontmatter block"]
+
+    schema_version_error = _schema_version_error(path, fm, _file_kind_from_schema(schema_path))
+    if schema_version_error is not None:
+        return [schema_version_error]
 
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(

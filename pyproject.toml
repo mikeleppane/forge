@@ -105,8 +105,9 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["tools"]
+source = ["tools", "hooks"]
 branch = true
+relative_files = true
 
 [tool.coverage.report]
 show_missing = true

@@ -50,3 +50,8 @@ jobs:
 
       - name: Run full quality gate
         run: make check
+
+      - name: Per-file coverage floor gate
+        run: |
+          pytest --cov=tools --cov=hooks --cov-report=xml -q
+          python -m tools.check_coverage_floor coverage.xml

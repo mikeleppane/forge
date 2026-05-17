@@ -52,9 +52,17 @@ def _parse_baseline(path: Path) -> dict[str, float]:
 
 
 def _parse_coverage_xml(path: Path) -> dict[str, float]:
-    """Parse a Cobertura XML and return ``{filename: percent}`` (line-rate times 100)."""
+    """Parse a Cobertura XML and return ``{filename: percent}`` (line-rate times 100).
+
+    Cobertura stores each ``<class>`` filename relative to one of the report's
+    ``<source>`` roots. To let the baseline file use full repo-rooted paths
+    (e.g. ``tools/state.py``), each class is also exposed under
+    ``{source}/{filename}`` for every declared source. When no ``<source>``
+    elements are present the bare filename is the only key.
+    """
     tree = ET.parse(path)  # noqa: S314 - trusted CI input
     root = tree.getroot()
+    sources = [s.text.strip() for s in root.iter("source") if s.text and s.text.strip()]
     out: dict[str, float] = {}
     for cls in root.iter("class"):
         filename = cls.get("filename")
@@ -65,7 +73,10 @@ def _parse_coverage_xml(path: Path) -> dict[str, float]:
             rate = float(rate_text)
         except ValueError:
             continue
-        out[filename] = rate * 100.0
+        pct = rate * 100.0
+        out[filename] = pct
+        for source in sources:
+            out[f"{source}/{filename}"] = pct
     return out
 
 

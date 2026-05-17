@@ -168,3 +168,39 @@ def test_malformed_baseline_line_exits_2(tmp_path: Path) -> None:
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert "baseline" in result.stderr.lower()
+
+
+def test_resolves_source_prefix_from_cobertura_sources(tmp_path: Path) -> None:
+    """When the XML declares <source>tools</source> and emits bare filenames
+    like ``state.py``, baseline entries written as ``tools/state.py`` still
+    match — pytest-cov's multi-source XML doesn't inline the source prefix
+    in the filename attribute.
+    """
+    baseline = tmp_path / "coverage.txt"
+    baseline.write_text("tools/state.py: 90%\nhooks/check_budget.py: 85%\n", encoding="utf-8")
+    coverage_xml = tmp_path / "coverage.xml"
+    xml = dedent(
+        """\
+        <?xml version="1.0" ?>
+        <coverage line-rate="0.9" version="6.0">
+          <sources>
+            <source>tools</source>
+            <source>hooks</source>
+          </sources>
+          <packages>
+            <package name="." line-rate="0.9">
+              <classes>
+                <class filename="state.py" line-rate="0.95" />
+                <class filename="check_budget.py" line-rate="0.88" />
+              </classes>
+            </package>
+          </packages>
+        </coverage>
+        """
+    )
+    coverage_xml.write_text(xml, encoding="utf-8")
+
+    result = _run_gate(coverage_xml, baseline=baseline)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Gate PASS (2 files checked)" in result.stdout

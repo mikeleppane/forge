@@ -1,4 +1,4 @@
-.PHONY: help install format fmt format-check lint fix typecheck test cov validate-health check clean ci plugin-refresh
+.PHONY: help install format fmt format-check lint fix typecheck test cov frontmatter validate-schemas plugin-path-validate plugin-validate coverage-floor validate-health check clean ci plugin-refresh
 
 # `make` with no target prints the help table.
 .DEFAULT_GOAL := help
@@ -9,6 +9,9 @@ PIP    := $(PY) -m pip
 RUFF   ?= $(VENV)/bin/ruff
 MYPY   ?= $(VENV)/bin/mypy
 PYTEST ?= $(VENV)/bin/pytest
+COVERAGE_XML ?= coverage.xml
+COVERAGE_FLOOR ?= 85
+FRONTMATTER_FILES := $(wildcard skills/*/SKILL.md commands/*.md)
 
 # PyPI override — corp default index requires auth; use public PyPI.
 PIP_INDEX := --index-url https://pypi.org/simple/
@@ -44,14 +47,43 @@ test: ## Run pytest
 	@$(PYTEST) -v
 
 cov: ## Run pytest with coverage
-	@$(PYTEST) --cov=tools --cov-report=term-missing
+	@$(PYTEST) --cov=tools --cov=hooks --cov-report=term-missing
+
+frontmatter: ## Lint skill and command frontmatter
+	@if [ -z "$(FRONTMATTER_FILES)" ]; then \
+		echo "No skills/commands found; failing."; \
+		exit 1; \
+	fi
+	@$(PY) -m tools.lint_frontmatter --schema schemas/frontmatter.schema.json $(FRONTMATTER_FILES)
+
+validate-schemas: ## Validate JSON schemas and templates
+	@$(PY) -m tools.check_schemas
+
+plugin-path-validate: ## Validate plugin manifest paths exist
+	@test -f .claude-plugin/plugin.json
+	@test -d skills
+	@test -d commands
+	@test -f hooks/hooks.json
+	@test -f hooks/check_budget.py
+	@test -f hooks/check_state_writer.py
+
+plugin-validate: ## Run claude plugin validate when the CLI is available
+	@if command -v claude >/dev/null 2>&1; then \
+		claude plugin validate .; \
+	else \
+		echo "claude CLI not installed; relying on path-validate fallback"; \
+	fi
+
+coverage-floor: ## Enforce per-file coverage floor
+	@$(PYTEST) --cov=tools --cov=hooks --cov-report=xml:$(COVERAGE_XML) -q
+	@$(PY) -m tools.check_coverage_floor $(COVERAGE_XML) --absolute-floor $(COVERAGE_FLOOR)
 
 validate-health: ## Run /forge:validate --target health on the current repo
 	@$(PY) -m tools.validate --target health
 
 check: format-check lint typecheck test validate-health ## Full local quality gate — run before every commit
 
-ci: check ## Alias for the composite quality gate (mirrors CI)
+ci: frontmatter validate-schemas plugin-path-validate plugin-validate check coverage-floor ## Full CI gate mirrored by GitHub Actions
 
 clean: ## Remove caches (ruff, mypy, pytest, pyc, coverage)
 	@rm -rf .ruff_cache .mypy_cache .pytest_cache htmlcov .coverage

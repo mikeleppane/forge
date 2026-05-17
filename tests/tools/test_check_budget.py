@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK = REPO_ROOT / "hooks" / "check_budget.py"
 
@@ -100,6 +102,26 @@ def test_evaluate_blocks_files_in_scope_string_not_array() -> None:
     assert "files_in_scope" in reason
 
 
+def test_evaluate_blocks_empty_files_in_scope_array() -> None:
+    prompt = 'context_budget:\n{\n  "files_in_scope": [],\n  "forbidden": ["read entire repo"]\n}\n'
+
+    allow, reason = check_budget.evaluate(prompt)
+
+    assert not allow
+    assert "files_in_scope" in reason
+
+
+def test_evaluate_blocks_non_string_files_in_scope_item() -> None:
+    prompt = (
+        'context_budget:\n{\n  "files_in_scope": [42],\n  "forbidden": ["read entire repo"]\n}\n'
+    )
+
+    allow, reason = check_budget.evaluate(prompt)
+
+    assert not allow
+    assert "files_in_scope items" in reason
+
+
 def test_evaluate_blocks_when_only_budget_is_inside_fenced_block() -> None:
     prompt = (
         "Here is an example budget:\n\n"
@@ -130,6 +152,22 @@ def test_evaluate_blocks_bare_extension_glob_repo_wide() -> None:
     assert "unbounded" in reason
 
 
+@pytest.mark.parametrize("item", ["", "all", "any", "everything"])
+def test_evaluate_blocks_unbounded_keyword_files_in_scope(item: str) -> None:
+    prompt = (
+        "context_budget:\n"
+        "{\n"
+        f'  "files_in_scope": ["{item}"],\n'
+        '  "forbidden": ["read entire repo"]\n'
+        "}\n"
+    )
+
+    allow, reason = check_budget.evaluate(prompt)
+
+    assert not allow
+    assert "unbounded" in reason
+
+
 def test_evaluate_allows_directory_glob() -> None:
     prompt = (
         "context_budget:\n"
@@ -150,11 +188,39 @@ def test_evaluate_blocks_empty_forbidden_array() -> None:
     assert "forbidden" in reason
 
 
+def test_evaluate_blocks_forbidden_string_not_array() -> None:
+    prompt = (
+        'context_budget:\n{\n  "files_in_scope": ["src/foo.py"],\n'
+        '  "forbidden": "read entire repo"\n}\n'
+    )
+
+    allow, reason = check_budget.evaluate(prompt)
+
+    assert not allow
+    assert "forbidden must be a JSON array" in reason
+
+
 def test_evaluate_blocks_invalid_json() -> None:
     prompt = "context_budget:\n{ this is not valid json }\n"
     allow, reason = check_budget.evaluate(prompt)
     assert not allow
     assert "not valid JSON" in reason
+
+
+def test_evaluate_blocks_non_object_budget_json() -> None:
+    allow, reason = check_budget._validate_budget([])
+
+    assert not allow
+    assert "must be a JSON object" in reason
+
+
+def test_evaluate_blocks_marker_without_json_object() -> None:
+    prompt = "context_budget:\nno object here\n"
+
+    allow, reason = check_budget.evaluate(prompt)
+
+    assert not allow
+    assert "missing required" in reason
 
 
 def test_evaluate_allows_inline_brace_form() -> None:
@@ -331,6 +397,31 @@ def test_check_budget_execute_tests_in_scope_must_be_array() -> None:
     allow, reason = check_budget.evaluate(prompt)
     assert not allow
     assert "tests_in_scope" in reason
+
+
+def test_check_budget_tests_in_scope_items_must_be_strings() -> None:
+    prompt = (
+        "context_budget:\n"
+        "{\n"
+        '  "phase": "execute",\n'
+        '  "files_in_scope": ["tools/state.py"],\n'
+        '  "tests_in_scope": [42],\n'
+        '  "forbidden": ["read entire repo"]\n'
+        "}\n"
+    )
+
+    allow, reason = check_budget.evaluate(prompt)
+
+    assert not allow
+    assert "tests_in_scope items" in reason
+
+
+def test_balanced_json_object_handles_escaped_quotes_and_braces() -> None:
+    text = '{"message": "escaped \\" brace } still string", "path": "src\\\\file.py"} tail'
+
+    block = check_budget._balanced_json_object(text)
+
+    assert block == '{"message": "escaped \\" brace } still string", "path": "src\\\\file.py"}'
 
 
 def test_main_denies_agent_payload_with_modern_pretooluse_shape() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -38,6 +39,12 @@ _spec.loader.exec_module(check_state_writer)
     ],
 )
 def test_is_blocked_path_refuses_feature_state_json_at_any_depth(blocked: str) -> None:
+    assert check_state_writer.is_blocked_path(blocked) is True
+
+
+def test_is_blocked_path_refuses_windows_style_feature_state_json() -> None:
+    blocked = r"C:\work\repo\.forge\features\2026-05-10-demo\state.json"
+
     assert check_state_writer.is_blocked_path(blocked) is True
 
 
@@ -176,6 +183,50 @@ def test_main_denies_direct_write_to_feature_state_json() -> None:
     assert output["hookSpecificOutput"]["permissionDecisionReason"].startswith(
         "FORGE state-writer hook:"
     )
+
+
+def test_main_denies_direct_write_to_feature_state_json_in_process(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"file_path": ".forge/features/2026-05-10-demo/state.json"},
+    }
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+
+    result = check_state_writer.main()
+    captured = capsys.readouterr()
+
+    assert result == 0
+    output = json.loads(captured.out)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert output["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "FORGE state-writer hook:"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {"tool_input": {"file_path": ".forge/features/x/state.json"}},
+        {"tool_name": "Write", "tool_input": "not an object"},
+    ],
+)
+def test_main_allows_payload_shapes_without_writeable_file_path(
+    payload: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+
+    result = check_state_writer.main()
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert json.loads(captured.out) == {}
 
 
 def test_main_allows_write_to_spec_md() -> None:

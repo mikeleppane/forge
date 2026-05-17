@@ -436,8 +436,8 @@ def _locate_repo_root(*, start: Path | None = None) -> Path | None:
     if override is not None:
         return override
 
-    current = start if start is not None else Path.cwd()
     try:
+        current = start if start is not None else Path.cwd()
         current = current.resolve()
     except OSError:
         return None

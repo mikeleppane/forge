@@ -184,6 +184,36 @@ def test_check_dispatch_brief_conventions_denies_on_forbidden_text_high(tmp_path
     assert "forbidden_text" in reason
 
 
+def test_check_dispatch_brief_conventions_reports_excerpt_when_not_suppressed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the non-suppressed excerpt path without changing loader policy."""
+    rules = [
+        _build_rule(
+            rule_id="high-forbidden",
+            pattern_kind="forbidden_text",
+            pattern="banned-.+",
+            scope=["dispatch_brief"],
+            severity="HIGH",
+        ),
+    ]
+    _write_conventions(tmp_path, rules)
+    monkeypatch.setattr(
+        check_budget,
+        "_EXCERPT_SUPPRESS_SEVERITIES",
+        frozenset(),
+    )
+
+    allow, reason = check_budget._check_dispatch_brief_conventions(
+        "contains banned-phrase here", repo_root=tmp_path
+    )
+
+    assert not allow
+    assert "high-forbidden" in reason
+    assert "banned-phrase here" in reason
+
+
 def test_check_dispatch_brief_conventions_allows_when_forbidden_text_absent(tmp_path: Path) -> None:
     rules = [
         _build_rule(
@@ -239,6 +269,27 @@ def test_check_dispatch_brief_conventions_denies_on_block_severity(tmp_path: Pat
     )
     assert not allow
     assert "no-claude-coauthor" in reason
+
+
+def test_check_dispatch_brief_conventions_denies_on_invalid_regex_pattern(
+    tmp_path: Path,
+) -> None:
+    rule = _build_rule(
+        rule_id="broken-regex-rule",
+        pattern_kind="required_text",
+        pattern="[unterminated",
+        scope=["dispatch_brief"],
+        severity="HIGH",
+    )
+    _write_conventions(tmp_path, [rule])
+
+    allow, reason = check_budget._check_dispatch_brief_conventions(
+        "prompt body", repo_root=tmp_path
+    )
+
+    assert not allow
+    assert "broken-regex-rule" in reason
+    assert "pattern failed to compile" in reason
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +626,18 @@ def test_strip_budget_block_returns_prompt_unchanged_when_no_marker() -> None:
     assert check_budget._strip_budget_block(prompt) == prompt
 
 
+def test_strip_budget_block_returns_prompt_unchanged_when_marker_has_no_object() -> None:
+    prompt = "context_budget:\nno json object follows\n"
+
+    assert check_budget._strip_budget_block(prompt) == prompt
+
+
+def test_strip_budget_block_returns_prompt_unchanged_when_marker_has_junk_prefix() -> None:
+    prompt = "context_budget: junk before object\n{}\n"
+
+    assert check_budget._strip_budget_block(prompt) == prompt
+
+
 def test_strip_budget_block_returns_prompt_unchanged_on_malformed_json() -> None:
     """Unbalanced braces inside the budget block → carve-out falls back."""
     prompt = 'context_budget:\n{\n  "files_in_scope": [\n  // unclosed\n'
@@ -658,6 +721,16 @@ def test_locate_repo_root_env_override_path_without_forge_dir_falls_back(
     assert "FORGE_REPO_ROOT" in captured.err
 
 
+def test_locate_repo_root_invalid_cwd_returns_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    tmp_path.rmdir()
+
+    assert check_budget._locate_repo_root() is None
+
+
 def test_locate_repo_root_unset_env_silent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -706,6 +779,19 @@ def test_dispatch_brief_deny_reason_for_malformed_conventions_includes_repo(
     assert f"(repo: {tmp_path})" in reason
     assert ".forge/conventions.json is present" in reason
     assert "python -m tools.validate --target conventions" in reason
+
+
+def test_load_conventions_or_error_denies_when_runtime_loader_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(check_budget, "_load_conventions", None)
+
+    rules, error = check_budget._load_conventions_or_error(tmp_path)
+
+    assert rules is None
+    assert error is not None
+    assert "could not be imported" in error
 
 
 # ---------------------------------------------------------------------------

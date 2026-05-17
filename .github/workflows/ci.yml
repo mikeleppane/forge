@@ -28,38 +28,19 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Lint frontmatter (skills + commands)
-        run: |
-          shopt -s nullglob
-          files=( skills/*/SKILL.md commands/*.md )
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No skills/commands found; failing."
-            exit 1
-          fi
-          python -m tools.lint_frontmatter --schema schemas/frontmatter.schema.json "${files[@]}"
+        run: make frontmatter
 
       - name: Validate JSON Schemas + templates
-        run: python -m tools.check_schemas
+        run: make validate-schemas
 
       - name: Validate plugin.json paths exist
-        run: |
-          test -f .claude-plugin/plugin.json
-          test -d skills
-          test -d commands
-          test -f hooks/hooks.json
-          test -f hooks/check_budget.py
+        run: make plugin-path-validate
 
       - name: Validate Claude plugin manifest (best-effort)
-        run: |
-          if command -v claude >/dev/null 2>&1; then
-            claude plugin validate .
-          else
-            echo "claude CLI not installed on runner; relying on path-validate fallback"
-          fi
+        run: make plugin-validate
 
       - name: Run full quality gate
         run: make check
 
       - name: Per-file coverage floor gate
-        run: |
-          pytest --cov=tools --cov=hooks --cov-report=xml -q
-          python -m tools.check_coverage_floor coverage.xml
+        run: make coverage-floor

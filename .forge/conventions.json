@@ -36,6 +36,15 @@
       "pattern": "code-review-and-quality",
       "scope": ["dispatch_brief"],
       "severity": "HIGH"
+    },
+    {
+      "id": "no-debugger-breakpoints-in-runtime",
+      "source_file": "AGENTS.md",
+      "source_line": 87,
+      "pattern_kind": "forbidden_text",
+      "pattern": "(?ms)^\\+\\+\\+ b/(?:tools|hooks)/[^\\n]*\\.py\\n(?:(?!^diff --git ).)*^\\+(?!\\+\\+).*\\b(?:breakpoint|pdb\\.set_trace)\\(",
+      "scope": ["diff"],
+      "severity": "BLOCK"
     }
   ]
 }

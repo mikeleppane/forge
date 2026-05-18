@@ -286,6 +286,34 @@ def test_forge_state_migrate_skips_symlinks(tmp_path: Path) -> None:
     assert outside.read_text(encoding="utf-8") == "---\nid: outsider\n---\n# stays put\n"
 
 
+def test_forge_state_migrate_repo_only_stamps_subblocks(tmp_path: Path) -> None:
+    """`--repo-only` migrates .forge/config.json subblocks without touching features."""
+    (tmp_path / ".forge").mkdir()
+    config_path = tmp_path / ".forge" / "config.json"
+    config_path.write_text(
+        json.dumps({"git_conventions": {}, "cross_ai": {"mode": "manual"}}),
+        encoding="utf-8",
+    )
+
+    result = _run_migrate(tmp_path, "--repo-only")
+
+    assert result.returncode == 0
+    migrated = json.loads(config_path.read_text(encoding="utf-8"))
+    assert migrated["git_conventions"]["schema_version"] == 1
+    assert migrated["cross_ai"]["schema_version"] == 1
+    assert "ok: migrate scope=repo changed=1" in result.stdout
+
+
+def test_forge_state_migrate_repo_only_silent_when_config_absent(tmp_path: Path) -> None:
+    """Missing .forge/config.json is silent — fresh-init repos pass cleanly."""
+    (tmp_path / ".forge").mkdir()
+
+    result = _run_migrate(tmp_path, "--repo-only")
+
+    assert result.returncode == 0
+    assert "changed=0" in result.stdout
+
+
 def test_forge_state_migrate_writes(tmp_path: Path) -> None:
     feature_folder = _write_active_feature(tmp_path)
     spec_path = feature_folder / "SPEC.md"

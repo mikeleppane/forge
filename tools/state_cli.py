@@ -76,9 +76,16 @@ _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 
 _JSON_FILE_KINDS: dict[str, str] = {
     "conventions.json": "conventions",
-    "cross-ai-config.json": "cross-ai-config",
-    "research-config.json": "research-config",
-    "git-conventions-config.json": "git-conventions-config",
+}
+
+# Repo-level .forge/config.json is structured as { <block>: { ... } }; the
+# block names map to the registered file kinds whose schemas validate each
+# subblock. The standalone files cross-ai-config.json etc. do not exist in a
+# real repo, only the subblocks; map them here instead of in _JSON_FILE_KINDS.
+_CONFIG_SUBBLOCK_KIND: dict[str, str] = {
+    "git_conventions": "git-conventions-config",
+    "cross_ai": "cross-ai-config",
+    "research": "research-config",
 }
 
 _MARKDOWN_FILE_KINDS: dict[str, str] = {
@@ -264,6 +271,39 @@ def _migrate_feature(feature_folder: Path, *, dry_run: bool) -> int:
     return changed
 
 
+def _migrate_repo_config(repo_root: Path, *, dry_run: bool) -> int:
+    """Apply pending migrations to each subblock of ``.forge/config.json``.
+
+    Returns the number of files written. The config file is optional; absence
+    is silent so a freshly-initialized repo does not warn.
+    """
+    config_path = repo_root / ".forge" / "config.json"
+    if not config_path.is_file():
+        return 0
+    original_payload = _read_json_doc(config_path)
+
+    new_payload = dict(original_payload)
+    changed_blocks: list[str] = []
+    for block_name, kind in _CONFIG_SUBBLOCK_KIND.items():
+        block = new_payload.get(block_name)
+        if not isinstance(block, dict):
+            continue
+        migrated_block = _migrate_doc(config_path, kind, block)
+        if migrated_block != block:
+            new_payload[block_name] = migrated_block
+            changed_blocks.append(block_name)
+
+    if not changed_blocks:
+        return 0
+    label = ", ".join(changed_blocks)
+    if dry_run:
+        print(f"dry-run: would migrate {config_path}: subblocks={label}")
+    else:
+        _atomic_write_json(config_path, new_payload)
+        print(f"migrated: {config_path}: subblocks={label}")
+    return 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the ``forge-state`` argparse surface with subcommands."""
     parser = argparse.ArgumentParser(
@@ -373,11 +413,34 @@ def _build_parser() -> argparse.ArgumentParser:
         "migrate",
         help="Run pending schema migrations for a feature folder.",
     )
-    p_migrate.add_argument("--feature", help="Feature ID under .forge/features/.")
+    p_migrate.add_argument(
+        "--feature",
+        help=(
+            "Feature ID under .forge/features/. Omit to target the single "
+            "active feature; the helper refuses ambiguously when multiple are "
+            "active. Skipped entirely when --repo-only is set."
+        ),
+    )
     p_migrate.add_argument(
         "--dry-run",
         action="store_true",
         help="Print planned migrations without modifying files.",
+    )
+    p_migrate.add_argument(
+        "--include-repo-config",
+        action="store_true",
+        help=(
+            "Also migrate repo-level .forge/config.json subblocks "
+            "(git_conventions, cross_ai, research)."
+        ),
+    )
+    p_migrate.add_argument(
+        "--repo-only",
+        action="store_true",
+        help=(
+            "Skip feature-folder migration; only touch repo-level "
+            ".forge/config.json. Implies --include-repo-config."
+        ),
     )
 
     return parser
@@ -429,10 +492,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             path = _state_path(repo_root, args.feature)
             finish_feature(path)
         elif args.command == "migrate":
+            include_repo = args.include_repo_config or args.repo_only
+            dry_run_suffix = " dry_run=true" if args.dry_run else ""
+
+            if args.repo_only:
+                repo_changed = _migrate_repo_config(repo_root, dry_run=args.dry_run)
+                print(f"ok: migrate scope=repo changed={repo_changed}{dry_run_suffix}")
+                return 0
+
             feature_folder = find_active_feature(repo_root, feature_id=args.feature)
             changed = _migrate_feature(feature_folder, dry_run=args.dry_run)
-            dry_run_suffix = " dry_run=true" if args.dry_run else ""
-            print(f"ok: migrate feature={feature_folder.name} changed={changed}{dry_run_suffix}")
+            repo_changed = (
+                _migrate_repo_config(repo_root, dry_run=args.dry_run) if include_repo else 0
+            )
+            print(
+                f"ok: migrate feature={feature_folder.name} changed={changed} "
+                f"repo_changed={repo_changed}{dry_run_suffix}"
+                if include_repo
+                else f"ok: migrate feature={feature_folder.name} changed={changed}{dry_run_suffix}"
+            )
             return 0
         else:  # pragma: no cover — argparse enforces subcommand membership
             parser.error(f"unknown command {args.command!r}")

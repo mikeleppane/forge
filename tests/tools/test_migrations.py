@@ -254,6 +254,38 @@ def test_forge_state_migrate_dry_run(tmp_path: Path) -> None:
     assert "ok: migrate feature=2026-05-17-migration-tests changed=1 dry_run=true" in result.stdout
 
 
+def test_forge_state_migrate_preserves_crlf(tmp_path: Path) -> None:
+    """A CRLF source file must stay CRLF after migration."""
+    feature_folder = _write_active_feature(tmp_path)
+    spec_path = feature_folder / "SPEC.md"
+    payload = yaml.safe_dump(_spec_frontmatter(), sort_keys=False).replace("\n", "\r\n")
+    spec_path.write_bytes(f"---\r\n{payload}---\r\n# Body\r\n".encode())
+
+    result = _run_migrate(tmp_path)
+
+    assert result.returncode == 0
+    written = spec_path.read_bytes()
+    assert b"\r\n" in written, written
+    # No bare LFs survived: every `\n` must have been preceded by `\r`.
+    bare_lf_count = written.count(b"\n") - written.count(b"\r\n")
+    assert bare_lf_count == 0, written
+
+
+def test_forge_state_migrate_skips_symlinks(tmp_path: Path) -> None:
+    """A symlink inside a feature folder must not be followed for read/write."""
+    feature_folder = _write_active_feature(tmp_path)
+    outside = tmp_path / "outside-target.md"
+    outside.write_text("---\nid: outsider\n---\n# stays put\n", encoding="utf-8")
+    symlink = feature_folder / "SPEC.md"
+    symlink.symlink_to(outside)
+
+    result = _run_migrate(tmp_path)
+
+    assert result.returncode == 0
+    assert "skip: SPEC.md: symlink" in result.stderr
+    assert outside.read_text(encoding="utf-8") == "---\nid: outsider\n---\n# stays put\n"
+
+
 def test_forge_state_migrate_writes(tmp_path: Path) -> None:
     feature_folder = _write_active_feature(tmp_path)
     spec_path = feature_folder / "SPEC.md"

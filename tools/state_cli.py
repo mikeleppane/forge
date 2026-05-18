@@ -44,9 +44,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import tempfile
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -114,8 +117,18 @@ def _read_json_doc(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], parsed)
 
 
-def _read_markdown_doc(path: Path) -> tuple[dict[str, Any], str]:
-    text = path.read_text(encoding="utf-8")
+def _read_markdown_doc(path: Path) -> tuple[dict[str, Any], str, str]:
+    """Return (frontmatter, body, line_ending) for a markdown file with frontmatter.
+
+    Reads bytes and decodes manually instead of ``path.read_text`` so universal
+    newline translation cannot collapse CRLF down to LF before the rewrite path
+    sees it; otherwise migrating a CRLF file would silently convert it to LF
+    on every run.
+    """
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise StateError(f"{path}: not valid UTF-8: {exc}") from exc
     match = _FRONTMATTER_RE.match(text)
     if match is None:
         raise StateError(f"{path}: missing YAML frontmatter")
@@ -125,17 +138,53 @@ def _read_markdown_doc(path: Path) -> tuple[dict[str, Any], str]:
         raise StateError(f"{path}: invalid YAML frontmatter: {exc}") from exc
     if not isinstance(parsed, dict):
         raise StateError(f"{path}: YAML frontmatter must be a mapping")
-    return cast(dict[str, Any], parsed), text[match.end() :]
+    line_ending = "\r\n" if "\r\n" in text[: match.end()] else "\n"
+    return cast(dict[str, Any], parsed), text[match.end() :], line_ending
 
 
-def _write_markdown_doc(path: Path, frontmatter: dict[str, Any], body: str) -> None:
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` atomically via tempfile + ``os.replace``.
+
+    Mirrors :func:`tools.state._atomic_write_json` so the markdown rewrite path
+    cannot leave a half-written SPEC.md/PLAN.md after a SIGKILL or power loss.
+    The tempfile is created in the same directory so ``os.replace`` is a
+    same-filesystem rename, which the kernel guarantees is atomic on
+    POSIX-compliant filesystems.
+    """
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        tmp_path.replace(path)
+    except BaseException:
+        with suppress(OSError):
+            tmp_path.unlink()
+        raise
+
+
+def _write_markdown_doc(
+    path: Path,
+    frontmatter: dict[str, Any],
+    body: str,
+    line_ending: str = "\n",
+) -> None:
     yaml_text = yaml.safe_dump(
         frontmatter,
         sort_keys=False,
         default_flow_style=False,
         allow_unicode=True,
     )
-    path.write_text(f"---\n{yaml_text}---\n{body}", encoding="utf-8")
+    if line_ending == "\r\n":
+        # yaml.safe_dump always emits LF; convert the rebuilt frontmatter
+        # block to CRLF so a CRLF source file doesn't get silently normalised
+        # to LF on every migration. The body slice already carries CRLF
+        # because we kept it byte-for-byte from the original file.
+        yaml_text = yaml_text.replace("\n", "\r\n")
+    content = f"---{line_ending}{yaml_text}---{line_ending}{body}"
+    _atomic_write_text(path, content)
 
 
 def _migrate_doc(path: Path, file_kind: str, doc: dict[str, Any]) -> dict[str, Any]:
@@ -168,6 +217,15 @@ def _migration_message(
 def _migrate_feature(feature_folder: Path, *, dry_run: bool) -> int:
     changed = 0
     for path in sorted(p for p in feature_folder.rglob("*") if p.is_file()):
+        # Refuse to follow symlinks: rglob preserves the symlinked path, so a
+        # symlink inside the feature folder pointing outside it would otherwise
+        # be read and (worse) rewritten through the dereferenced target.
+        if path.is_symlink():
+            print(
+                f"skip: {path.relative_to(feature_folder)}: symlink (refusing to follow)",
+                file=sys.stderr,
+            )
+            continue
         if path.suffix not in {".json", ".md"}:
             continue
         file_kind = _file_kind(path)
@@ -192,7 +250,7 @@ def _migrate_feature(feature_folder: Path, *, dry_run: bool) -> int:
                 print(f"migrated: {message}")
             continue
 
-        original, body = _read_markdown_doc(path)
+        original, body, line_ending = _read_markdown_doc(path)
         migrated = _migrate_doc(path, file_kind, original)
         if migrated == original:
             continue
@@ -201,7 +259,7 @@ def _migrate_feature(feature_folder: Path, *, dry_run: bool) -> int:
         if dry_run:
             print(f"dry-run: would migrate {message}")
         else:
-            _write_markdown_doc(path, migrated, body)
+            _write_markdown_doc(path, migrated, body, line_ending=line_ending)
             print(f"migrated: {message}")
     return changed
 

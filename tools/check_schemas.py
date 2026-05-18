@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import warnings
@@ -23,16 +22,15 @@ from typing import Any
 import jsonschema
 import yaml
 
-from tools.migrations import v1_noop
-from tools.migrations.registry import REGISTRY
-
-_SCHEMA_VERSION_ANCHORS = v1_noop.__name__
+from tools.migrations.registry import (
+    file_kind_from_schema_filename,
+    schema_version_error,
+    schema_version_missing_is_fatal,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS_DIR = REPO_ROOT / "schemas"
 TEMPLATES_DIR = REPO_ROOT / "templates"
-_SCHEMA_VERSION_REQUIRED_ENV = "FORGE_SCHEMA_VERSION_REQUIRED"
-_FRONTMATTER_SCHEMA_SUFFIX = "-frontmatter.schema.json"
 
 
 class _SchemaVersionError(RuntimeError):
@@ -67,50 +65,16 @@ def _check_schema(path: Path, *, quiet: bool = False) -> None:
     _emit(f"OK schema {path.name}", quiet=quiet)
 
 
-def _file_kind_from_schema_filename(schema_filename: str) -> str:
-    if schema_filename.endswith(_FRONTMATTER_SCHEMA_SUFFIX):
-        return schema_filename.removesuffix(_FRONTMATTER_SCHEMA_SUFFIX)
-    return schema_filename.removesuffix(".schema.json")
-
-
-def _latest_registered_schema_version(file_kind: str) -> int | None:
-    versions = [
-        version
-        for migration in REGISTRY.values()
-        if migration.file_kind == file_kind
-        for version in (migration.from_version, migration.to_version)
-    ]
-    if not versions:
-        return None
-    return max(versions)
-
-
-def _check_schema_version(path: Path, payload: dict[str, Any], file_kind: str) -> None:
-    if "schema_version" not in payload:
-        message = (
-            f"{path}: schema_version missing (will be required in Phase B); "
-            "run 'forge-state migrate' to add it"
-        )
-        if os.environ.get(_SCHEMA_VERSION_REQUIRED_ENV) == "1":
-            raise _SchemaVersionError(message)
+def _check_schema_version(path: Path, payload: dict[str, Any], file_kind: str | None) -> None:
+    """Validate schema_version on a template; warn unless strict env demands an error."""
+    issue = schema_version_error(path, payload, file_kind)
+    if issue is None:
+        return
+    severity, message = issue
+    if severity == "missing" and not schema_version_missing_is_fatal():
         warnings.warn(message, category=DeprecationWarning, stacklevel=3)
         return
-
-    version = payload["schema_version"]
-    if isinstance(version, bool) or not isinstance(version, int):
-        return
-
-    latest_version = _latest_registered_schema_version(file_kind)
-    if latest_version is None:
-        raise _SchemaVersionError(
-            f"{path}: schema_version {version} is newer than latest registered version 0 "
-            f"for {file_kind}"
-        )
-    if version > latest_version:
-        raise _SchemaVersionError(
-            f"{path}: schema_version {version} is newer than latest registered version "
-            f"{latest_version} for {file_kind}"
-        )
+    raise _SchemaVersionError(message)
 
 
 def _check_state_template(*, quiet: bool = False) -> None:
@@ -145,7 +109,7 @@ def _check_template_frontmatter(
     template_path = TEMPLATES_DIR / template_rel
     schema = json.loads((SCHEMAS_DIR / schema_filename).read_text(encoding="utf-8"))
     fm = _extract_frontmatter(template_path)
-    _check_schema_version(template_path, fm, _file_kind_from_schema_filename(schema_filename))
+    _check_schema_version(template_path, fm, file_kind_from_schema_filename(schema_filename))
 
     # SPEC.md template still uses placeholder strings for non-frontmatter-schema
     # fields the validator checks (id/tier/created/capability) — fill them so

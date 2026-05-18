@@ -52,7 +52,6 @@ from typing import Any, cast
 
 import yaml
 
-from tools.migrations import v1_noop
 from tools.migrations.registry import MigrationRegistryError, apply_pending
 from tools.state import (
     VALID_LIFECYCLE_PHASES,
@@ -69,8 +68,6 @@ from tools.state import (
     set_execute_current_slice,
     start_phase,
 )
-
-_MIGRATION_ANCHOR = v1_noop
 
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 
@@ -169,7 +166,6 @@ def _migration_message(
 
 
 def _migrate_feature(feature_folder: Path, *, dry_run: bool) -> int:
-    _ = _MIGRATION_ANCHOR
     changed = 0
     for path in sorted(p for p in feature_folder.rglob("*") if p.is_file()):
         if path.suffix not in {".json", ".md"}:

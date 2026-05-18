@@ -7,13 +7,24 @@ flow_version are independent axes.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 # Version axes are intentionally separate:
 # - schema_version is the per-file file-format version.
 # - flow_version belongs only to the state.json lifecycle protocol.
+
+SCHEMA_VERSION_REQUIRED_ENV = "FORGE_SCHEMA_VERSION_REQUIRED"
+
+_FRONTMATTER_SCHEMA_SUFFIX = "-frontmatter.schema.json"
+# Generic skill/command frontmatter schema is *not* a versioned FORGE artifact
+# contract — it lives alongside Markdown skills/commands that are pure docs.
+# Including it in the F6 axis would force a per-skill schema_version on every
+# SKILL.md / command.md with no migration story.
+_GENERIC_FRONTMATTER_SCHEMA = "frontmatter.schema.json"
 
 
 class MigrationRegistryError(RuntimeError):
@@ -34,20 +45,33 @@ class Migration:
 REGISTRY: dict[tuple[str, int], Migration] = {}
 
 
-def register(migration: Migration) -> Migration:
+def register(migration: Migration, *, replace: bool = False) -> Migration:
     """Register a migration by file kind and source schema version.
 
     Args:
         migration: Migration contract to store.
+        replace: When True, overwrite a registration for the same
+            ``(file_kind, from_version)`` key. Defaults to False so that
+            import-order accidents cannot silently swap a real ``1 -> 2``
+            migration with an identity anchor (or vice versa) at startup.
 
     Returns:
         The same migration instance, unchanged.
 
     Raises:
-        MigrationRegistryError: If the migration has invalid versions.
+        MigrationRegistryError: If the migration has invalid versions or
+            collides with an existing registration and ``replace=False``.
     """
     _validate_migration(migration)
-    REGISTRY[(migration.file_kind, migration.from_version)] = migration
+    key = (migration.file_kind, migration.from_version)
+    existing = REGISTRY.get(key)
+    if existing is not None and not replace:
+        raise MigrationRegistryError(
+            f"{migration.file_kind} already has a migration from schema_version "
+            f"{migration.from_version} (to {existing.to_version}); pass replace=True "
+            "to overwrite explicitly"
+        )
+    REGISTRY[key] = migration
     return migration
 
 
@@ -85,11 +109,8 @@ def apply_pending(file_kind: str, doc: dict[str, Any]) -> dict[str, Any]:
                 f"{file_kind} migration chain is broken at schema_version "
                 f"{current_version}; latest registered version is {latest_version}"
             )
-        if migration.to_version <= migration.from_version:
-            raise MigrationRegistryError(
-                f"{file_kind} migration {migration.from_version}->"
-                f"{migration.to_version} does not advance"
-            )
+        # to_version > from_version is already enforced at registration time
+        # (see _validate_migration), so no in-loop re-check is needed here.
 
         current_doc = dict(migration.transform(dict(current_doc)))
         current_doc["schema_version"] = migration.to_version
@@ -114,16 +135,34 @@ def _validate_migration(migration: Migration) -> None:
         )
 
 
+def parse_schema_version(value: Any) -> int:
+    """Coerce a ``schema_version`` field to a positive int.
+
+    Refuses ``bool`` explicitly even though Python treats ``bool`` as an ``int``
+    subclass; a YAML ``schema_version: true`` should not be silently accepted as
+    "version 1". Also refuses non-int types and values < 1.
+    """
+    if isinstance(value, bool):
+        raise MigrationRegistryError(f"schema_version must be an integer, got bool ({value!r})")
+    if not isinstance(value, int):
+        raise MigrationRegistryError(
+            f"schema_version must be an integer, got {type(value).__name__} ({value!r})"
+        )
+    if value < 1:
+        raise MigrationRegistryError(f"schema_version must be >= 1, got {value}")
+    return value
+
+
 def _schema_version(doc: dict[str, Any]) -> int:
-    version = doc.get("schema_version", 1)
-    if not isinstance(version, int):
-        raise MigrationRegistryError("schema_version must be an integer")
-    if version < 1:
-        raise MigrationRegistryError("schema_version must be greater than or equal to 1")
-    return version
+    return parse_schema_version(doc.get("schema_version", 1))
 
 
-def _latest_known_version(file_kind: str) -> int | None:
+def latest_known_version(file_kind: str) -> int | None:
+    """Maximum ``schema_version`` known to the registry for ``file_kind``.
+
+    Returns ``None`` when no migration (identity or otherwise) has been
+    registered for that kind — the caller treats that as "not in F6 scope".
+    """
     versions = [
         version
         for migration in REGISTRY.values()
@@ -133,3 +172,75 @@ def _latest_known_version(file_kind: str) -> int | None:
     if not versions:
         return None
     return max(versions)
+
+
+_latest_known_version = latest_known_version  # backwards-compatible alias
+
+
+def file_kind_from_schema_filename(schema_filename: str) -> str | None:
+    """Return the F6 file_kind for a schema filename, or ``None`` if out of scope.
+
+    The generic skill/command frontmatter schema (``frontmatter.schema.json``)
+    is intentionally out of scope: skills/commands are pure documentation files
+    with no versioned-artifact contract behind them, and forcing each to declare
+    a ``schema_version`` would give operators no clean migration path while
+    adding none of the safety benefits of the F6 axis.
+    """
+    if schema_filename == _GENERIC_FRONTMATTER_SCHEMA:
+        return None
+    if schema_filename.endswith(_FRONTMATTER_SCHEMA_SUFFIX):
+        return schema_filename.removesuffix(_FRONTMATTER_SCHEMA_SUFFIX)
+    return schema_filename.removesuffix(".schema.json")
+
+
+SchemaVersionSeverity = Literal["missing", "bad_type", "too_new"]
+
+
+def schema_version_error(
+    path: Path,
+    payload: dict[str, Any],
+    file_kind: str | None,
+) -> tuple[SchemaVersionSeverity, str] | None:
+    """Validate ``schema_version`` on a parsed payload.
+
+    Args:
+        path: Source path; included verbatim in returned messages so callers
+            can surface them without re-formatting.
+        payload: Parsed frontmatter dict or JSON object.
+        file_kind: Result of :func:`file_kind_from_schema_filename`, or any
+            other kind string the caller derives. ``None`` (or a kind that
+            has no registry entry) means "not a versioned FORGE artifact";
+            the check is skipped silently.
+
+    Returns:
+        ``(severity, message)`` describing the issue, or ``None`` when the
+        payload is valid or out of scope. Severity is one of ``"missing"``,
+        ``"bad_type"``, or ``"too_new"``.
+    """
+    if file_kind is None:
+        return None
+    latest = latest_known_version(file_kind)
+    if latest is None:
+        return None
+    if "schema_version" not in payload:
+        return (
+            "missing",
+            f"{path}: schema_version missing; run 'forge-state migrate' to add "
+            f"it (set {SCHEMA_VERSION_REQUIRED_ENV}=1 to treat this as an error)",
+        )
+    try:
+        version = parse_schema_version(payload["schema_version"])
+    except MigrationRegistryError as exc:
+        return ("bad_type", f"{path}: {exc}")
+    if version > latest:
+        return (
+            "too_new",
+            f"{path}: schema_version {version} is newer than latest registered "
+            f"version {latest} for {file_kind}",
+        )
+    return None
+
+
+def schema_version_missing_is_fatal() -> bool:
+    """True when ``FORGE_SCHEMA_VERSION_REQUIRED=1`` is set in the environment."""
+    return os.environ.get(SCHEMA_VERSION_REQUIRED_ENV) == "1"

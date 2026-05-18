@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import warnings
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -15,14 +16,14 @@ import yaml
 
 from tools.lint_frontmatter import validate_file
 from tools.migrations import registry as migration_registry
-from tools.migrations import v1_noop
 from tools.migrations.registry import Migration, apply_pending, register
-
-_V1_ANCHOR = v1_noop
 
 
 @pytest.fixture(autouse=True)
 def _restore_registry() -> Generator[None]:
+    # autouse: tests may mutate the global REGISTRY (register/clear). Snapshot
+    # and restore so the v1 identity baseline survives across tests regardless
+    # of order.
     original = dict(migration_registry.REGISTRY)
     try:
         yield
@@ -140,7 +141,7 @@ def test_invertibility_when_declared() -> None:
     assert backward == doc
 
 
-def test_phase_a_missing_warns(tmp_path: Path) -> None:
+def test_missing_schema_version_warns(tmp_path: Path) -> None:
     path = tmp_path / "SPEC.md"
     schema_path = Path("schemas/spec-frontmatter.schema.json")
     _write_markdown(path, _spec_frontmatter())
@@ -149,7 +150,7 @@ def test_phase_a_missing_warns(tmp_path: Path) -> None:
         validate_file(path, schema_path)
 
 
-def test_phase_a_missing_still_loads(tmp_path: Path) -> None:
+def test_missing_schema_version_still_loads(tmp_path: Path) -> None:
     path = tmp_path / "SPEC.md"
     schema_path = Path("schemas/spec-frontmatter.schema.json")
     _write_markdown(path, _spec_frontmatter())
@@ -160,7 +161,7 @@ def test_phase_a_missing_still_loads(tmp_path: Path) -> None:
     assert errors == []
 
 
-def test_phase_b_simulation_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_required_env_blocks_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "SPEC.md"
     schema_path = Path("schemas/spec-frontmatter.schema.json")
     _write_markdown(path, _spec_frontmatter())
@@ -170,6 +171,62 @@ def test_phase_b_simulation_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     assert len(errors) == 1
     assert "schema_version missing" in errors[0]
+
+
+def test_generic_skill_frontmatter_is_out_of_scope(tmp_path: Path) -> None:
+    """Skill/command frontmatter must not trip the schema_version gate."""
+    path = tmp_path / "SKILL.md"
+    schema_path = Path("schemas/frontmatter.schema.json")
+    path.write_text(
+        "---\n"
+        "name: example-skill\n"
+        "description: Author an example. Use when demonstrating the lint surface.\n"
+        "---\n# body\n",
+        encoding="utf-8",
+    )
+
+    # No warning expected even when the strict env is set.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert validate_file(path, schema_path) == []
+
+
+def test_bool_schema_version_refused(tmp_path: Path) -> None:
+    """`schema_version: true` must not be silently treated as version 1."""
+    path = tmp_path / "SPEC.md"
+    schema_path = Path("schemas/spec-frontmatter.schema.json")
+    payload = _spec_frontmatter()
+    payload["schema_version"] = True
+    _write_markdown(path, payload)
+
+    errors = validate_file(path, schema_path)
+
+    assert len(errors) == 1
+    assert "schema_version must be an integer, got bool" in errors[0]
+
+
+def test_register_duplicate_refused() -> None:
+    """A second registration for the same (file_kind, from_version) is refused."""
+    base = Migration(
+        file_kind="synthetic",
+        from_version=1,
+        to_version=2,
+        transform=lambda doc: doc,
+    )
+    other = Migration(
+        file_kind="synthetic",
+        from_version=1,
+        to_version=2,
+        transform=lambda doc: {**doc, "tag": "other"},
+    )
+
+    register(base)
+    with pytest.raises(migration_registry.MigrationRegistryError, match="already has"):
+        register(other)
+
+    # replace=True is an explicit opt-in that succeeds.
+    register(other, replace=True)
+    assert migration_registry.REGISTRY[("synthetic", 1)] is other
 
 
 def test_higher_than_known_refused(tmp_path: Path) -> None:
